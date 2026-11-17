@@ -1,0 +1,9 @@
+node_modules/
+web/dist/
+backend/bin/
+backend/pb_data/
+.env
+*.local
+.DS_Store
+.claude/
+out/

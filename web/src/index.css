@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+/* Apple / iOS design tokens (light appearance only) */
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --color-ios-blue: #007aff;
+  --color-ios-green: #34c759;
+  --color-ios-red: #ff3b30;
+  --color-ios-orange: #ff9500;
+  --color-ios-yellow: #ffcc00;
+  --color-ios-purple: #af52de;
+  --color-ios-indigo: #5856d6;
+  --color-ios-teal: #30b0c7;
+  --color-ios-pink: #ff2d55;
+  --color-ios-gray: #8e8e93;
+  --color-ios-gray3: #c7c7cc;
+  --color-ios-gray4: #d1d1d6;
+  --color-ios-gray5: #e5e5ea;
+  --color-ios-gray6: #f2f2f7;
+  --color-ios-label2: rgb(60 60 67 / 0.6);
+  --color-ios-label3: rgb(60 60 67 / 0.3);
+  --color-ios-sep: rgb(60 60 67 / 0.2);
+  --color-ios-fill: rgb(120 120 128 / 0.12);
+}
+
+@layer base {
+  :root { color-scheme: light; }
+  html, body { background: #f2f2f7; color: #000; }
+  body {
+    font-size: 17px;
+    letter-spacing: -0.01em;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+  input, select, textarea, button { font: inherit; letter-spacing: inherit; }
+  input[type="date"], input[type="time"], input[type="datetime-local"] {
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    min-height: 1.5em;
+  }
+  input[type="date"]::-webkit-date-and-time-value,
+  input[type="time"]::-webkit-date-and-time-value,
+  input[type="datetime-local"]::-webkit-date-and-time-value { text-align: right; }
+}
+
+/* Inset separators between list rows, like iOS grouped lists */
+.ios-row + .ios-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: var(--inset, 16px);
+  right: 0;
+  height: 0.5px;
+  background: rgb(60 60 67 / 0.29);
+}
+
+@keyframes sheet-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes toast-in { from { transform: translateY(-140%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.animate-sheet { animation: sheet-up 0.35s cubic-bezier(0.32, 0.72, 0, 1); }
+.animate-fade { animation: fade-in 0.2s ease-out; }
+.animate-toast { animation: toast-in 0.4s cubic-bezier(0.32, 0.72, 0, 1); }
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
+.tabular { font-variant-numeric: tabular-nums; }
+
+input[type="range"] { accent-color: #007aff; }

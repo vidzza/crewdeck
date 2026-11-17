@@ -1,0 +1,64 @@
+# On every push to main: type-check the app, run the backend test (all must pass),
+# build a release and publish it to the "release" branch.
+# The Pi checks that branch every 2 minutes and installs new versions by itself.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install app dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Type-check the app
+        working-directory: web
+        run: npx tsc --noEmit -p .
+
+      - name: Backend tests
+        run: |
+          curl -fsSL -o /tmp/pb.zip https://github.com/pocketbase/pocketbase/releases/download/v0.40.6/pocketbase_0.40.6_linux_amd64.zip
+          mkdir -p backend/bin
+          unzip -q -o /tmp/pb.zip pocketbase -d backend/bin
+          ./backend/scripts/test.sh
+
+      - name: Build the release
+        run: |
+          mkdir -p out
+          (cd web && VITE_API_URL=/ npx vite build --outDir ../out/pb_public --emptyOutDir)
+          cp -R backend/pb_hooks backend/pb_migrations out/
+          cp backend/crewdeck.service backend/crewdeck.env.example backend/scripts/install-pi.sh \
+             backend/scripts/crewdeck-update.sh backend/crewdeck-update.service backend/crewdeck-update.timer out/
+          echo "$GITHUB_SHA" > out/VERSION
+
+      - name: Publish to the release branch
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd out
+          git init -q -b release
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Release ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${TOKEN}@github.com/${{ github.repository }}.git" release

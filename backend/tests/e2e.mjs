@@ -1,0 +1,339 @@
+// End-to-end test of the Crewdeck backend. Run it with backend/scripts/test.sh.
+const API = process.env.API || 'http://127.0.0.1:8099'
+let pass = 0
+let fail = 0
+const ok = (cond, msg, extra) => {
+  if (cond) {
+    pass++
+    console.log('  ✓', msg)
+  } else {
+    fail++
+    console.log('  ✗', msg, extra !== undefined ? JSON.stringify(extra).slice(0, 400) : '')
+  }
+}
+async function req(method, path, body, token) {
+  const r = await fetch(API + path, {
+    method,
+    headers: { 'content-type': 'application/json', ...(token ? { Authorization: token } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  let data = null
+  try {
+    data = await r.json()
+  } catch {}
+  return { status: r.status, data }
+}
+const login = async (email, password) => (await req('POST', '/api/collections/users/auth-with-password', { identity: email, password })).data
+const pbDate = (d) => d.toISOString().replace('T', ' ')
+const H = 3600 * 1000
+
+const BAR = { lat: 19.4326, lng: -99.1332 }
+const FAR = { lat: 19.4426, lng: -99.1332 } // ~1.1 km away
+
+console.log('\n# Setup')
+ok((await req('GET', '/api/ch/status')).data.needsSetup === true, 'needsSetup is true at first')
+const SETUP = { company: 'Test Company', location: { name: 'Downtown', address: '1 Main St' }, name: 'Owner Test', email: 'owner@test.com', password: 'password123', timezone: 'America/Denver' }
+ok((await req('GET', '/api/ch/status')).data.needsCode === true, 'status says a setup code is required')
+ok((await req('POST', '/api/ch/setup', { ...SETUP, code: 'wrong' })).status === 403, 'setup with a wrong code → 403')
+ok((await req('POST', '/api/ch/setup', { ...SETUP, company: '', code: 'test-code-123' })).status === 400, 'setup without a company name → 400')
+let r = await req('POST', '/api/ch/setup', { ...SETUP, code: 'test-code-123' })
+ok(r.status === 200, 'setup with the right code', r)
+ok((await req('POST', '/api/ch/setup', { ...SETUP, email: 'x@test.com', code: 'test-code-123' })).status === 400, 'setup again → 400')
+ok((await req('GET', '/api/ch/status')).data.company === 'Test Company', 'status shows the company name')
+ok((await req('POST', '/api/collections/users/records', { email: 'hacker@test.com', password: 'password123', passwordConfirm: 'password123', access: 'owner', active: true })).status >= 400, 'public sign-up is blocked')
+
+const owner = await login('owner@test.com', 'password123')
+ok(owner?.token, 'owner signs in', owner)
+const OT = owner.token
+
+console.log('\n# Team')
+const positions = (await req('GET', '/api/collections/positions/records?sort=sort', null, OT)).data.items
+ok(positions.length === 6, '6 positions seeded', positions.map((p) => p.name))
+const mk = async (name, email, access, posIdx) => {
+  const r = await req(
+    'POST',
+    '/api/collections/users/records',
+    { name, email, password: 'password123', passwordConfirm: 'password123', access, active: true, positions: [positions[posIdx].id] },
+    OT,
+  )
+  ok(r.status === 200, `create ${name} (${access})`, r.data)
+  return r.data
+}
+const gm = await mk('Gina GM', 'gm@test.com', 'admin', 0)
+const am = await mk('Andy AM', 'am@test.com', 'manager', 1)
+const e1 = await mk('Beto Bartender', 'e1@test.com', 'employee', 2)
+const e2 = await mk('Carla Barback', 'e2@test.com', 'employee', 3)
+const e3 = await mk('Dani Bouncer', 'e3@test.com', 'employee', 5)
+const GT = (await login('gm@test.com', 'password123')).token
+const AT = (await login('am@test.com', 'password123')).token
+const T1 = (await login('e1@test.com', 'password123')).token
+const T2 = (await login('e2@test.com', 'password123')).token
+const T3 = (await login('e3@test.com', 'password123')).token
+ok(GT && AT && T1 && T2 && T3, 'everyone can sign in')
+
+ok((await req('POST', '/api/collections/users/records', { email: 'z@test.com', password: 'password123', passwordConfirm: 'password123', access: 'employee', active: true }, T1)).status >= 400, 'employee can NOT create users')
+ok((await req('PATCH', `/api/collections/users/records/${e1.id}`, { access: 'owner' }, T1)).status >= 400, 'employee can NOT make themselves owner')
+ok((await req('PATCH', `/api/collections/users/records/${e1.id}`, { phone: '555' }, T1)).status === 200, 'employee CAN change their phone')
+ok((await req('PATCH', `/api/collections/users/records/${owner.record.id}`, { name: 'hack' }, GT)).status >= 400, 'admin can NOT edit the owner')
+ok((await req('POST', '/api/collections/users/records', { email: 'o2@test.com', password: 'password123', passwordConfirm: 'password123', access: 'owner', active: true }, GT)).status >= 400, 'admin can NOT create owners')
+const usersAsEmp = (await req('GET', '/api/collections/users/records', null, T1)).data
+ok(usersAsEmp.items.length === 6 && !usersAsEmp.items.find((u) => u.id !== e1.id && u.email), 'employee sees the team without emails', usersAsEmp.items.map((u) => u.email))
+ok((await req('GET', '/api/collections/pay_rates/records', null, T1)).data?.items?.length === 0, "employee can't see pay (empty list)")
+r = await req('POST', '/api/collections/pay_rates/records', { user: e1.id, hourly: 100 }, GT)
+ok(r.status === 200, 'admin saves an hourly rate', r.data)
+ok((await req('GET', '/api/collections/pay_rates/records', null, T1)).data.items.length === 0, 'employee still cannot see pay')
+
+// deactivate / reactivate
+await req('PATCH', `/api/collections/users/records/${e3.id}`, { active: false }, GT)
+ok(!(await login('e3@test.com', 'password123'))?.token, 'deactivated user cannot sign in')
+await req('PATCH', `/api/collections/users/records/${e3.id}`, { active: true }, GT)
+
+// change own password
+r = await req('PATCH', `/api/collections/users/records/${e3.id}`, { oldPassword: 'password123', password: 'password456', passwordConfirm: 'password456' }, T3)
+ok(r.status === 200, 'employee changes their own password', r.data)
+const T3b = (await login('e3@test.com', 'password456'))?.token
+ok(!!T3b, 'signs in with the new password')
+const T3c = T3b
+
+console.log('\n# Location')
+const loc = (await req('GET', '/api/collections/locations/records', null, OT)).data.items[0]
+ok(loc.name === 'Downtown' && loc.address === '1 Main St', 'first location comes from setup', loc)
+ok((await req('GET', '/api/collections/sections/records', null, OT)).data.items.length === 0, 'fresh install has no example sections')
+const company = (await req('GET', '/api/collections/company/records', null, T1)).data.items
+ok(company.length === 1 && company[0].name === 'Test Company', 'employees can read the company name')
+ok((await req('PATCH', `/api/collections/company/records/${company[0].id}`, { name: 'Hacked' }, T1)).status >= 400, 'employee can NOT rename the company')
+r = await req('POST', '/api/collections/sections/records', { location: loc.id, name: 'Main Bar', color: '#007aff' }, GT)
+ok(r.status === 200, 'admin adds a section', r.data)
+const sections = [r.data]
+ok((await req('GET', `/api/collections/users/records/${e1.id}`, null, OT)).data.locations?.[0] === loc.id, 'new people are placed at the only location')
+
+console.log('\n# Clock-in before GPS is set up')
+r = await req('POST', '/api/ch/clock/in', BAR, T3c)
+ok(r.status === 200 && r.data.ok && r.data.geo === 'not_configured', 'allowed while GPS is not set up', r.data)
+r = await req('POST', '/api/ch/clock/out', BAR, T3c)
+ok(r.status === 200 && r.data.ok, 'clock-out works', r.data)
+
+ok((await req('PATCH', `/api/collections/locations/records/${loc.id}`, { lat: BAR.lat, lng: BAR.lng, radius_m: 100 }, T1)).status >= 400, 'employee can NOT move the GPS point')
+r = await req('PATCH', `/api/collections/locations/records/${loc.id}`, { lat: BAR.lat, lng: BAR.lng, radius_m: 100 }, GT)
+ok(r.status === 200, 'admin sets the GPS point', r.data)
+
+console.log('\n# Time clock')
+r = await req('POST', '/api/ch/clock/in', { lat: BAR.lat + 0.0002, lng: BAR.lng, acc: 15 }, T1)
+ok(r.data?.ok && r.data.geo === 'inside', 'clock-in inside (≈22 m, ±15)', r.data)
+ok((await req('POST', '/api/ch/clock/in', { ...BAR, acc: 10 }, T1)).status === 400, 'double clock-in is blocked')
+r = await req('POST', '/api/ch/clock/break', {}, T1)
+ok(r.data?.onBreak === true, 'starts a break', r.data)
+r = await req('POST', '/api/ch/clock/break', {}, T1)
+ok(r.data?.onBreak === false, 'ends the break', r.data)
+r = await req('POST', '/api/ch/clock/out', { ...BAR, acc: 10 }, T1)
+ok(r.data?.ok && typeof r.data.hours === 'number', 'clock-out returns hours', r.data)
+
+r = await req('POST', '/api/ch/clock/in', { lat: BAR.lat + 0.0009, lng: BAR.lng, acc: 30 }, T2)
+ok(r.data?.ok && r.data.geo === 'uncertain', 'at the edge (≈100 m, ±30) is accepted as "uncertain"', r.data)
+await req('POST', '/api/ch/clock/out', {}, T2)
+
+r = await req('POST', '/api/ch/clock/in', { ...FAR, acc: 10 }, T2)
+ok(r.data?.ok === false && r.data.needReason && r.data.geo === 'outside' && r.data.dist > 1000, 'outside without a reason → asks for a reason', r.data)
+r = await req('POST', '/api/ch/clock/in', { ...FAR, acc: 10, reason: 'Getting ice' }, T2)
+ok(r.data?.ok && r.data.geo === 'outside', 'outside with a reason → saved', r.data)
+const flaggedCard = r.data.timecard
+r = await req('POST', '/api/ch/clock/out', {}, T2)
+r = await req('POST', '/api/ch/clock/in', {}, T3c)
+ok(r.data?.needReason && r.data.geo === 'no_gps', 'no GPS → asks for a reason', r.data)
+r = await req('POST', '/api/ch/clock/in', { ...BAR, acc: 900 }, T3c)
+ok(r.data?.needReason && r.data.geo === 'low_accuracy', 'weak GPS (±900) → asks for a reason', r.data)
+
+let cards = (await req('GET', `/api/collections/timecards/records?filter=${encodeURIComponent(`id="${flaggedCard}"`)}`, null, T2)).data.items
+ok(cards[0]?.flagged === true && cards[0]?.approved === false, 'outside clock-in is marked "needs review"', cards[0])
+ok((await req('GET', '/api/collections/timecards/records', null, T1)).data.items.every((c) => c.user === e1.id), 'employee only sees their own clock-ins')
+ok((await req('PATCH', `/api/collections/timecards/records/${flaggedCard}`, { approved: true }, AT)).status >= 400, 'manager can NOT approve clock-ins')
+r = await req('PATCH', `/api/collections/timecards/records/${flaggedCard}`, { notes: 'ok', break_min: 15 }, AT)
+ok(r.status === 200 && r.data.edited === true && r.data.edited_by === am.id, 'manager fixes hours → marked edited', r.data)
+r = await req('PATCH', `/api/collections/timecards/records/${flaggedCard}`, { approved: true }, GT)
+ok(r.status === 200 && r.data.approved && r.data.approved_by === gm.id, 'admin approves the clock-in', r.data)
+ok((await req('PATCH', `/api/collections/timecards/records/${flaggedCard}`, { break_min: 0 }, T2)).status >= 400, 'employee can NOT edit their clock-ins')
+const ownerNotes = (await req('GET', '/api/collections/notifications/records?sort=-created', null, OT)).data.items
+ok(ownerNotes.some((n) => n.title.includes('outside')), 'owner got an "outside" alert', ownerNotes.map((n) => n.title))
+
+console.log('\n# Schedule')
+const base = new Date(Date.now() + 2 * 24 * H)
+base.setUTCHours(2, 0, 0, 0) // 8 PM in Mexico City
+const shift = (u, offH, durH = 6) => ({
+  location: loc.id,
+  section: sections[0].id,
+  position: positions[2].id,
+  user: u,
+  starts_at: new Date(base.getTime() + offH * H).toISOString(),
+  ends_at: new Date(base.getTime() + (offH + durH) * H).toISOString(),
+})
+ok((await req('POST', '/api/collections/shifts/records', { ...shift(e1.id, 0), published: true }, AT)).status >= 400, 'manager can NOT publish')
+r = await req('POST', '/api/collections/shifts/records', shift(e1.id, 0), AT)
+ok(r.status === 200 && r.data.published === false && r.data.created_by === am.id, 'manager creates a draft', r.data)
+const s1 = r.data
+ok((await req('POST', '/api/collections/shifts/records', shift(e1.id, 0), T1)).status >= 400, 'employee can NOT create shifts')
+ok((await req('GET', `/api/collections/shifts/records`, null, T1)).data.items.length === 0, "employee can't see drafts")
+const s2 = (await req('POST', '/api/collections/shifts/records', shift(e2.id, 24), GT)).data
+const s3 = (await req('POST', '/api/collections/shifts/records', shift(e1.id, 48), GT)).data
+const sOpen = (await req('POST', '/api/collections/shifts/records', shift('', 72), GT)).data
+ok((await req('POST', '/api/ch/schedule/publish', { from: new Date(Date.now()).toISOString(), to: new Date(Date.now() + 10 * 24 * H).toISOString() }, AT)).status === 403, 'manager can NOT publish the week')
+r = await req('POST', '/api/ch/schedule/publish', { from: new Date(Date.now()).toISOString(), to: new Date(Date.now() + 10 * 24 * H).toISOString() }, GT)
+ok(r.data?.published === 4 && r.data.notified === 2, 'admin publishes 4 shifts and notifies 2 people', r.data)
+ok((await req('GET', `/api/collections/shifts/records`, null, T1)).data.items.length === 4, 'employee now sees published shifts')
+ok((await req('PATCH', `/api/collections/shifts/records/${s1.id}`, { notes: 'x' }, AT)).status >= 400, 'manager can NOT edit published shifts')
+const e1Notes = (await req('GET', '/api/collections/notifications/records', null, T1)).data.items
+ok(e1Notes.some((n) => n.title.includes('schedule is out')), 'employee got "Your schedule is out"')
+
+console.log('\n# Shift changes: cover')
+ok((await req('POST', '/api/ch/requests', { type: 'cover', shift: s2.id }, T1)).status === 403, "can't ask to cover someone else's shift")
+r = await req('POST', '/api/ch/requests', { type: 'cover', shift: s1.id, target_user: e2.id, note: 'exam' }, T1)
+ok(r.status === 200, 'Beto asks Carla to cover', r.data)
+const rq1 = r.data.id
+ok((await req('POST', '/api/ch/requests', { type: 'drop', shift: s1.id }, T1)).status === 400, 'no duplicate request for the same shift')
+ok((await req('POST', `/api/ch/requests/${rq1}/accept`, {}, T3c)).status === 403, "Dani can't accept (it isn't for him)")
+ok((await req('POST', `/api/ch/requests/${rq1}/approve`, {}, GT)).status === 400, "admin can't approve before the coworker accepts")
+r = await req('POST', `/api/ch/requests/${rq1}/accept`, {}, T2)
+ok(r.status === 200, 'Carla accepts', r.data)
+ok((await req('POST', `/api/ch/requests/${rq1}/approve`, {}, AT)).status === 403, 'manager can NOT approve changes')
+r = await req('POST', `/api/ch/requests/${rq1}/approve`, {}, GT)
+ok(r.status === 200, 'admin approves', r.data)
+let s1now = (await req('GET', `/api/collections/shifts/records/${s1.id}`, null, OT)).data
+ok(s1now.user === e2.id, 'the shift now belongs to Carla')
+const audit = (await req('GET', '/api/collections/audit_log/records?sort=-created', null, OT)).data.items
+ok(audit.some((a) => a.action === 'request.approve'), 'approval is in the history log')
+ok((await req('GET', '/api/collections/audit_log/records', null, T1)).data.items.length === 0, "employee can't see the history log")
+
+console.log('\n# Shift changes: swap with a conflict')
+// s1 (Carla, day 0) ⇄ s3 (Beto, day 2). An overlapping shift for Beto on day 0 creates a conflict.
+const clash = (await req('POST', '/api/collections/shifts/records', { ...shift(e1.id, 1), published: true }, GT)).data
+r = await req('POST', '/api/ch/requests', { type: 'swap', shift: s1.id, target_shift: s3.id }, T2)
+ok(r.status === 200, 'Carla proposes a swap with Beto', r.data)
+const rq2 = r.data.id
+r = await req('POST', `/api/ch/requests/${rq2}/accept`, {}, T1)
+ok(r.status === 200, 'Beto accepts')
+r = await req('POST', `/api/ch/requests/${rq2}/approve`, {}, OT)
+ok(r.status === 409 && r.data.conflicts?.length > 0, 'approving warns about the overlap (409)', r.data)
+r = await req('POST', `/api/ch/requests/${rq2}/approve`, { force: true }, OT)
+ok(r.status === 200, 'owner approves anyway', r.data)
+s1now = (await req('GET', `/api/collections/shifts/records/${s1.id}`, null, OT)).data
+const s3now = (await req('GET', `/api/collections/shifts/records/${s3.id}`, null, OT)).data
+ok(s1now.user === e1.id && s3now.user === e2.id, 'shifts were swapped')
+await req('DELETE', `/api/collections/shifts/records/${clash.id}`, null, GT)
+
+console.log('\n# Drop and pick up')
+r = await req('POST', '/api/ch/requests', { type: 'drop', shift: s3.id }, T2)
+ok(r.status === 200, 'Carla drops her shift', r.data)
+const rq3 = r.data.id
+r = await req('POST', `/api/ch/requests/${rq3}/approve`, {}, GT)
+ok(r.status === 200, 'admin approves the drop', r.data)
+ok((await req('GET', `/api/collections/shifts/records/${s3.id}`, null, OT)).data.user === '', 'the shift is now open')
+r = await req('POST', '/api/ch/requests', { type: 'pickup', shift: sOpen.id }, T3c)
+ok(r.status === 200, 'Dani asks for an open shift', r.data)
+const rq4 = r.data.id
+ok((await req('POST', '/api/ch/requests', { type: 'pickup', shift: s1.id }, T3c)).status === 400, "can't pick up a shift that's taken")
+r = await req('POST', `/api/ch/requests/${rq4}/reject`, { note: 'already covered' }, GT)
+ok(r.status === 200, 'admin declines with a reason')
+ok((await req('GET', `/api/collections/shifts/records/${sOpen.id}`, null, OT)).data.user === '', 'the shift stays open after declining')
+r = await req('POST', '/api/ch/requests', { type: 'cover', shift: s1.id }, T1)
+ok(r.status === 200, 'Beto asks anyone to cover')
+const rq5 = r.data.id
+const seenBy3 = (await req('GET', '/api/collections/shift_requests/records', null, T3c)).data.items
+ok(seenBy3.some((x) => x.id === rq5), 'Dani sees the open cover request')
+r = await req('POST', `/api/ch/requests/${rq5}/cancel`, {}, T1)
+ok(r.status === 200, 'Beto cancels it')
+ok((await req('POST', `/api/ch/requests/${rq5}/accept`, {}, T3c)).status === 400, "a cancelled request can't be accepted")
+
+console.log('\n# Time off')
+const tStart = new Date(base.getTime() + 5 * 24 * H)
+r = await req('POST', '/api/ch/timeoff', { starts_at: tStart.toISOString(), ends_at: new Date(tStart.getTime() + 24 * H).toISOString(), kind: 'vacation', note: 'wedding' }, T1)
+ok(r.status === 200, 'Beto requests a day off', r.data)
+const to1 = r.data.id
+ok((await req('POST', `/api/ch/timeoff/${to1}/approve`, {}, T2)).status === 403, 'employee can NOT approve')
+ok((await req('POST', `/api/ch/timeoff/${to1}/approve`, {}, AT)).status === 403, 'manager can NOT approve')
+r = await req('POST', `/api/ch/timeoff/${to1}/approve`, {}, GT)
+ok(r.status === 200, 'admin approves the day off')
+ok((await req('GET', '/api/collections/time_off/records', null, T2)).data.items.length === 0, "Carla can't see other people's time off")
+ok((await req('POST', '/api/collections/time_off/records', { user: e1.id, starts_at: pbDate(tStart), ends_at: pbDate(tStart), kind: 'sick', status: 'approved' }, T1)).status >= 400, "can't self-approve by creating a record directly")
+r = await req('POST', `/api/ch/timeoff/${to1}/cancel`, {}, T1)
+ok(r.status === 200, 'Beto cancels his approved (future) day off')
+
+console.log('\n# Copy week')
+const wk = new Date(base.getTime() - 3 * 24 * H)
+r = await req('POST', '/api/ch/schedule/copy', { from: wk.toISOString(), to: new Date(wk.getTime() + 7 * 24 * H).toISOString() }, AT)
+ok(r.status === 200 && r.data.copied >= 1, 'manager copies a week as drafts', r.data)
+ok((await req('POST', '/api/ch/schedule/copy', { from: wk.toISOString(), to: wk.toISOString() }, T1)).status === 403, 'employee can NOT copy weeks')
+
+console.log('\n# Notifications')
+const n2 = (await req('GET', '/api/collections/notifications/records', null, T2)).data
+ok(n2.items.length > 0 && n2.items.every((n) => n.user === e2.id), 'Carla only sees her own notifications', n2.items.length)
+r = await req('POST', '/api/ch/notifications/read-all', {}, T2)
+ok(r.status === 200 && r.data.count > 0, 'mark all as read', r.data)
+
+console.log('\n# Invites and phone sign-in')
+ok((await req('POST', '/api/collections/users/records', { name: 'No Contact', password: 'password123', passwordConfirm: 'password123', access: 'employee', active: true }, GT)).status === 400, 'a person needs a phone or an email')
+const tmpPw = 'tmp-' + Math.random().toString(36).slice(2) + 'X9'
+r = await req('POST', '/api/collections/users/records', { name: 'Paula Phone', phone: '+1 (555) 010-2020', password: tmpPw, passwordConfirm: tmpPw, access: 'employee', active: true, positions: [positions[2].id] }, GT)
+ok(r.status === 200 && r.data.phone_login === '5550102020' && !r.data.joined_at, 'admin adds someone with only a phone', r.data)
+const paula = r.data
+ok((await req('POST', '/api/collections/users/records', { name: 'Dup', phone: '555-010-2020', password: tmpPw, passwordConfirm: tmpPw, access: 'employee', active: true }, GT)).status === 400, 'the same phone can not be used twice')
+ok((await req('POST', '/api/ch/invites', { user: paula.id }, T1)).status === 403, 'employee can NOT create invite links')
+r = await req('POST', '/api/ch/invites', { user: paula.id }, GT)
+ok(r.status === 200 && r.data.token?.length >= 32, 'admin creates an invite link', r.data)
+const firstToken = r.data.token
+r = await req('POST', '/api/ch/invites', { user: paula.id }, GT)
+const token = r.data.token
+ok((await req('GET', `/api/ch/invites/${firstToken}`)).data.ok === false, 'a new link replaces the old one')
+r = await req('GET', `/api/ch/invites/${token}`)
+ok(r.data.ok && r.data.name === 'Paula Phone' && r.data.company === 'Test Company' && r.data.invitedBy === 'Gina GM', 'the link shows who it is for', r.data)
+ok((await req('POST', `/api/ch/invites/${token}/accept`, { password: 'short' })).status === 400, 'password needs 8+ characters')
+r = await req('POST', `/api/ch/invites/${token}/accept`, { password: 'paula-pass-1', email: 'paula@test.com' })
+ok(r.status === 200 && r.data.token && r.data.record?.joined_at, 'accepting signs her in and marks her as joined', r.data)
+ok((await req('POST', `/api/ch/invites/${token}/accept`, { password: 'paula-pass-2' })).status === 400, 'a used link can not be used again')
+ok(!!(await login('(555) 010 2020'.replace(/\D/g, ''), 'paula-pass-1'))?.token, 'she signs in with her phone number')
+ok(!!(await login('paula@test.com', 'paula-pass-1'))?.token, 'or with the email she added')
+r = await req('POST', '/api/ch/invites', { user: paula.id }, GT)
+r = await req('POST', `/api/ch/invites/${r.data.token}/accept`, { password: 'paula-pass-new' })
+ok(r.status === 200 && !!(await login('5550102020', 'paula-pass-new'))?.token, 'a new link resets a forgotten password')
+ok((await req('POST', '/api/ch/invites', { user: owner.record.id }, GT)).status === 403, 'admin can NOT reset the owner')
+
+console.log('\n# Second location')
+r = await req('POST', '/api/collections/locations/records', { name: 'Uptown', lat: 19.5, lng: -99.2, radius_m: 100, active: true }, T1)
+ok(r.status >= 400, 'employee can NOT add locations')
+r = await req('POST', '/api/collections/locations/records', { name: 'Uptown', lat: 19.5, lng: -99.2, radius_m: 100, ot_weekly_hours: 40, active: true }, GT)
+ok(r.status === 200, 'admin adds a second location', r.data)
+const up = r.data
+r = await req('POST', '/api/collections/users/records', { name: 'Ursula Uptown', email: 'ursula@test.com', password: 'password123', passwordConfirm: 'password123', access: 'employee', active: true, locations: [up.id], positions: [positions[2].id] }, GT)
+ok(r.status === 200 && r.data.locations.length === 1 && r.data.locations[0] === up.id, 'admin adds someone who only works Uptown', r.data)
+const ursula = r.data
+const TU = (await login('ursula@test.com', 'password123')).token
+ok((await req('PATCH', `/api/collections/users/records/${ursula.id}`, { locations: [up.id, loc.id] }, TU)).status >= 400, 'people can NOT add themselves to other locations')
+const upStart = new Date(Date.now() + 4 * 24 * H)
+r = await req('POST', '/api/collections/shifts/records', { location: up.id, position: positions[2].id, user: ursula.id, starts_at: upStart.toISOString(), ends_at: new Date(upStart.getTime() + 6 * H).toISOString(), published: true }, GT)
+ok(r.status === 200, 'admin schedules Ursula Uptown', r.data)
+const upShift = r.data
+ok(!(await req('GET', '/api/collections/shifts/records?perPage=200', null, T1)).data.items.some((x) => x.location === up.id), "Downtown staff don't see Uptown shifts")
+const uSees = (await req('GET', '/api/collections/shifts/records?perPage=200', null, TU)).data.items
+ok(uSees.length > 0 && uSees.every((x) => x.location === up.id), 'Uptown staff only see Uptown shifts', uSees.map((x) => x.location))
+ok((await req('POST', '/api/collections/shifts/records', { location: up.id, user: '', starts_at: upStart.toISOString(), ends_at: new Date(upStart.getTime() + 6 * H).toISOString() }, AT)).status >= 400, "a Downtown manager can NOT schedule Uptown")
+const betoShift = (await req('GET', '/api/collections/shifts/records?perPage=200&sort=-starts_at', null, T1)).data.items.find((x) => x.user === e1.id && new Date(x.starts_at) > new Date())
+r = await req('POST', '/api/ch/requests', { type: 'cover', shift: betoShift.id, target_user: ursula.id }, T1)
+ok(r.status === 400, "can't ask someone from another location to cover", r.data)
+r = await req('POST', '/api/ch/clock/in', { lat: 19.5001, lng: -99.2, acc: 10 }, TU)
+ok(r.data?.ok && r.data.geo === 'inside' && r.data.place === 'Uptown', 'Ursula clocks in at Uptown', r.data)
+await req('POST', '/api/ch/clock/out', {}, TU)
+r = await req('POST', '/api/ch/clock/in', { lat: 19.4326, lng: -99.1332, acc: 10 }, TU)
+ok(r.data?.needReason && r.data.geo === 'outside', "Downtown's location doesn't count for Uptown staff", r.data)
+
+console.log('\n# Auto clock-out')
+const su = (await req('POST', '/api/collections/_superusers/auth-with-password', { identity: 'su@test.com', password: 'superpass123' })).data
+if (su?.token) {
+  // A clock-in from 16 hours ago with no clock-out
+  const old = await req('POST', '/api/collections/timecards/records', { user: e3.id, location: loc.id, clock_in: new Date(Date.now() - 16 * H).toISOString() }, su.token)
+  ok(old.status === 200, 'old open clock-in created', old.data)
+  r = await req('POST', '/api/ch/admin/autoclose', {}, su.token)
+  ok(r.status === 200, 'auto clock-out runs')
+  const closed = (await req('GET', `/api/collections/timecards/records/${old.data.id}`, null, OT)).data
+  ok(closed.clock_out && closed.flagged && !closed.approved, 'it was closed and marked for review', closed)
+} else console.log('  (no superuser: skipped)')
+
+console.log(`\n${pass} passed, ${fail} failed`)
+process.exit(fail ? 1 : 0)

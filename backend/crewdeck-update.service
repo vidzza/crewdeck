@@ -1,0 +1,10 @@
+[Unit]
+Description=Crewdeck auto-update (installs new releases from GitHub)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/crewdeck-update
+Nice=15
+IOSchedulingClass=idle

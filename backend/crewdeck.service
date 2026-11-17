@@ -1,0 +1,36 @@
+[Unit]
+Description=Crewdeck scheduling and time clock (PocketBase)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=crewdeck
+Group=crewdeck
+WorkingDirectory=/opt/crewdeck
+EnvironmentFile=/opt/crewdeck/crewdeck.env
+# Serves the app (pb_public) and the API on one local port. Only reachable through the Cloudflare Tunnel.
+ExecStart=/opt/crewdeck/pocketbase serve --http=127.0.0.1:${CREWDECK_PORT} --dir=/opt/crewdeck/pb_data --publicDir=/opt/crewdeck/pb_public --hooksDir=/opt/crewdeck/pb_hooks --migrationsDir=/opt/crewdeck/pb_migrations --automigrate=false --origins=${CREWDECK_ORIGINS}
+Restart=always
+RestartSec=5
+LimitNOFILE=4096
+
+# Share the Pi politely with the other apps on it (GiraBoard):
+# lower CPU/disk priority, at most one CPU core, and a soft memory ceiling.
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+CPUQuota=100%
+MemoryHigh=180M
+MemoryMax=260M
+Environment=GOMEMLIMIT=150MiB
+
+# Basic hardening: it can only write inside its own folder.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/crewdeck
+
+[Install]
+WantedBy=multi-user.target
