@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { pb, errMsg, isAdmin, isMgr, type PayRate, type Timecard } from '../lib/pb'
+import { pb, errMsg, isAdmin, isMgr, isOwner, type PayRate, type Timecard } from '../lib/pb'
 import { addDays, d, fmtDay, fmtHours, fmtTime, fmtWeek, hoursBetween, startOfWeek, toLocalInput } from '../lib/dates'
 import { GEO_LABEL, GEO_TONE } from '../lib/geo'
 import { useData } from '../store'
 import { LocationPicker, TopActions, WeekBar } from '../chrome'
-import { Avatar, Banner, Card, Empty, Group, HeaderButton, InputRow, Page, Pill, Row, SelectRow, Sheet, Spinner, toast } from '../ui'
+import { ask, Avatar, Banner, Card, Empty, Group, HeaderButton, InputRow, Page, Pill, Row, SelectRow, Sheet, Spinner, toast } from '../ui'
 
 const worked = (c: Timecard) => Math.max(0, hoursBetween(c.clock_in, c.clock_out || null) - (c.break_min || 0) / 60)
 
 export default function Hours() {
-  const { me, userName, currentLocation, myLocations } = useData()
+  const { me, users, userName, currentLocation, myLocations } = useData()
   const locId = myLocations.length > 1 ? currentLocation?.id || '' : ''
   const [week, setWeek] = useState(() => startOfWeek(new Date()))
   const [cards, setCards] = useState<Timecard[] | null>(null)
@@ -40,12 +40,20 @@ export default function Hours() {
     ;(cards || []).filter((c) => (!locId || c.location === locId) && (!onlyFlagged || (c.flagged && !c.approved))).forEach((c) => m.set(c.user, [...(m.get(c.user) || []), c]))
     return [...m.entries()].sort((a, b) => userName(a[0]).localeCompare(userName(b[0])))
   }, [cards, onlyFlagged, userName, locId])
-  const flaggedCount = (cards || []).filter((c) => c.flagged && !c.approved).length
+  const here = (cards || []).filter((c) => !locId || c.location === locId)
+  const flaggedCount = here.filter((c) => c.flagged && !c.approved).length
   const myTotal = (cards || []).filter((c) => c.user === me.id).reduce((a, c) => a + worked(c), 0)
+  // Team hierarchy: only the owner changes their own hours, an admin's or the owner's.
+  const canEdit = (c: Timecard) => {
+    if (!isMgr(me)) return false
+    if (isOwner(me)) return true
+    const person = users.find((u) => u.id === c.user)
+    return c.user !== me.id && !isAdmin(person)
+  }
 
   const exportCsv = () => {
     const rows = [['Employee', 'Date', 'In', 'Out', 'Break (min)', 'Hours', 'Location check', 'Distance (m)', 'Needs review', 'Approved', 'Edited', 'Reason', 'Notes']]
-    ;(cards || []).forEach((c) =>
+    here.forEach((c) =>
       rows.push([
         userName(c.user),
         fmtDay(c.clock_in),
@@ -126,8 +134,8 @@ export default function Hours() {
               {list.map((c) => (
                 <Row
                   key={c.id}
-                  onClick={isMgr(me) ? () => setEdit(c) : undefined}
-                  chevron={isMgr(me)}
+                  onClick={canEdit(c) ? () => setEdit(c) : undefined}
+                  chevron={canEdit(c)}
                   leading={isMgr(me) ? <Avatar name={userName(c.user)} size={34} /> : undefined}
                   title={
                     <span className="flex items-center justify-between gap-2">
@@ -176,6 +184,13 @@ export default function Hours() {
 
 function EntrySheet({ card, onClose, onSaved }: { card: Timecard | null; onClose: () => void; onSaved: () => void }) {
   const { me, users, currentLocation, userName } = useData()
+  // Managers add hours for people at this location. Only the owner adds their own or an admin's.
+  const people = users.filter(
+    (u) =>
+      u.active &&
+      (isOwner(me) || (u.id !== me.id && !isAdmin(u))) &&
+      (isAdmin(me) || !currentLocation || !u.locations?.length || u.locations.includes(currentLocation.id)),
+  )
   const [f, setF] = useState({
     user: card?.user || '',
     clock_in: toLocalInput(card?.clock_in || null),
@@ -233,7 +248,7 @@ function EntrySheet({ card, onClose, onSaved }: { card: Timecard | null; onClose
   }
 
   const remove = async () => {
-    if (!card || !confirm("Delete this entry? This can't be undone.")) return
+    if (!card || !(await ask({ title: 'Delete this entry?', message: "This can't be undone.", confirm: 'Delete', destructive: true }))) return
     setBusy(true)
     try {
       await pb.collection('timecards').delete(card.id)
@@ -259,7 +274,7 @@ function EntrySheet({ card, onClose, onSaved }: { card: Timecard | null; onClose
             label="Who"
             value={f.user}
             onChange={(v) => setF({ ...f, user: v })}
-            options={[{ value: '', label: 'Choose' }].concat(users.filter((u) => u.active).map((u) => ({ value: u.id, label: u.name || u.email })))}
+            options={[{ value: '', label: 'Choose' }].concat(people.map((u) => ({ value: u.id, label: u.name || u.email || u.phone })))}
           />
         </Group>
       )}

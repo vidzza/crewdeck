@@ -4,7 +4,7 @@ import { pb, api, errMsg, isAdmin, isMgr, isOwner, type ShiftRequest, type TimeO
 import { addDays, d, fmtDay, fmtShift, fromInputs, toDateInput } from '../lib/dates'
 import { useData } from '../store'
 import { TopActions } from '../chrome'
-import { Button, Card, Empty, Group, InputRow, Page, Pill, Row, Segmented, SectionTitle, SelectRow, Sheet, Spinner, toast, type Tone } from '../ui'
+import { askText, ask, Button, Card, Empty, Group, InputRow, Page, Pill, Row, Segmented, SectionTitle, SelectRow, Sheet, Spinner, toast, type Tone } from '../ui'
 
 const TYPE: Record<string, string> = { cover: 'Cover', swap: 'Swap', drop: 'Drop Shift', pickup: 'Pick Up Open Shift' }
 const REQ_STATUS: Record<string, { t: string; tone: Tone }> = {
@@ -42,7 +42,7 @@ export default function Requests() {
 
 // ---------- shift changes ----------
 function ShiftChanges() {
-  const { me } = useData()
+  const { me, users, refreshUnread } = useData()
   const [list, setList] = useState<ShiftRequest[] | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
 
@@ -62,11 +62,11 @@ function ShiftChanges() {
   const act = async (r: ShiftRequest, action: string, extra: Record<string, unknown> = {}) => {
     let note = ''
     if (action === 'reject') {
-      const n = prompt('Reason (optional)')
+      const n = await askText({ title: 'Decline this change?', message: "They'll see your reason.", placeholder: 'Reason (optional)', confirm: 'Decline' })
       if (n === null) return
       note = n
     }
-    if (action === 'cancel' && !confirm('Cancel this request?')) return
+    if (action === 'cancel' && !(await ask({ title: 'Cancel this request?', confirm: 'Cancel Request', cancel: 'Keep It', destructive: true }))) return
     setBusy(r.id + action)
     try {
       await api(`/api/ch/requests/${r.id}/${action}`, { note, ...extra })
@@ -80,11 +80,12 @@ function ShiftChanges() {
         }[action] || 'Done',
       )
       await load()
+      refreshUnread()
     } catch (e) {
       // 409 = conflict (overlap or time off). The owner decides whether to approve anyway.
       if (e instanceof ClientResponseError && e.status === 409 && action === 'approve') {
         const msg = (e.response as { message?: string }).message
-        if (confirm(`Heads up: ${msg}\n\nApprove anyway?`)) return act(r, 'approve', { force: true })
+        if (await ask({ title: 'Approve anyway?', message: msg, confirm: 'Approve' })) return act(r, 'approve', { force: true })
       } else toast(errMsg(e), 'error')
     } finally {
       setBusy(null)
@@ -97,7 +98,15 @@ function ShiftChanges() {
   // Only the owner approves shift changes. Admins and managers can see what's waiting.
   const toApprove = isOwner(me) ? list.filter((r) => r.status === 'pending_admin') : []
   const waitingOwner = !isOwner(me) && isMgr(me) ? list.filter((r) => r.status === 'pending_admin' && r.requester !== me.id) : []
-  const forMe = list.filter((r) => r.status === 'pending_peer' && r.requester !== me.id && (r.target_user === me.id || (r.type === 'cover' && !r.target_user)))
+  // Open covers: for people who work at that location (owners and admins work everywhere).
+  const worksThere = (r: ShiftRequest) => {
+    const loc = r.expand?.shift?.location
+    const meNow = users.find((u) => u.id === me.id) || me
+    return isAdmin(meNow) || !loc || !meNow.locations?.length || meNow.locations.includes(loc)
+  }
+  const forMe = list.filter(
+    (r) => r.status === 'pending_peer' && r.requester !== me.id && (r.target_user === me.id || (r.type === 'cover' && !r.target_user && worksThere(r))),
+  )
   const mine = list.filter((r) => r.requester === me.id && open(r))
   const others = isMgr(me) ? list.filter((r) => r.status === 'pending_peer' && r.requester !== me.id && !forMe.includes(r)) : []
   const history = list.filter((r) => !open(r)).slice(0, 30)
@@ -196,7 +205,14 @@ function ReqCard({ r, children, muted }: { r: ShiftRequest; children?: ReactNode
   const { me, userName, position } = useData()
   const s = r.expand?.shift
   const ts = r.expand?.target_shift
-  const st = r.status === 'pending_admin' && isOwner(me) ? { t: 'Waiting for you', tone: 'orange' as Tone } : REQ_STATUS[r.status]
+  const st =
+    r.status === 'pending_admin' && isOwner(me)
+      ? { t: 'Waiting for you', tone: 'orange' as Tone }
+      : r.status === 'pending_peer' && r.target_user === me.id
+        ? { t: 'Waiting for you', tone: 'blue' as Tone }
+        : r.status === 'declined' && r.target_user === me.id
+          ? { t: 'You said no', tone: 'gray' as Tone }
+          : REQ_STATUS[r.status]
   const name = (id: string) => (id === me.id ? 'You' : userName(id))
   let who = name(r.requester)
   if (r.type === 'cover') who += r.target_user ? ` → ${name(r.target_user)}` : ' → anyone'
@@ -220,10 +236,12 @@ function ReqCard({ r, children, muted }: { r: ShiftRequest; children?: ReactNode
       )}
       {ts && <div className="text-[15px] text-ios-label2">for {fmtShift(ts)}</div>}
       {r.note && <div className="mt-2 text-[15px] italic text-ios-label2">“{r.note}”</div>}
-      {r.decision_note && <div className="mt-1 text-[15px] text-ios-label2">Owner: “{r.decision_note}”</div>}
+      {r.decision_note && (
+        <div className="mt-1 text-[15px] text-ios-label2">{r.decided_by ? `${name(r.decided_by)}: “${r.decision_note}”` : r.decision_note}</div>
+      )}
       <div className="mt-2 text-[13px] text-ios-label3">
         {fmtDay(r.created)}
-        {r.decided_by ? ` · ${r.status === 'approved' ? 'approved' : 'declined'} by ${name(r.decided_by)}` : ''}
+        {r.decided_by ? ` · ${r.status === 'approved' ? 'approved' : 'declined'} by ${r.decided_by === me.id ? 'you' : userName(r.decided_by)}` : ''}
       </div>
       {children && <div className="mt-3 flex flex-wrap gap-2">{children}</div>}
     </Card>
@@ -232,7 +250,7 @@ function ReqCard({ r, children, muted }: { r: ShiftRequest; children?: ReactNode
 
 // ---------- time off ----------
 function TimeOffList() {
-  const { me, userName } = useData()
+  const { me, userName, refreshUnread } = useData()
   const [list, setList] = useState<TimeOff[] | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [asking, setAsking] = useState(false)
@@ -248,16 +266,17 @@ function TimeOffList() {
   const act = async (t: TimeOff, action: 'approve' | 'reject' | 'cancel') => {
     let note = ''
     if (action === 'reject') {
-      const n = prompt('Reason (optional)')
+      const n = await askText({ title: 'Decline this time off?', message: "They'll see your reason.", placeholder: 'Reason (optional)', confirm: 'Decline' })
       if (n === null) return
       note = n
     }
-    if (action === 'cancel' && !confirm('Cancel this time off?')) return
+    if (action === 'cancel' && !(await ask({ title: 'Cancel this time off?', confirm: 'Cancel Time Off', cancel: 'Keep It', destructive: true }))) return
     setBusy(t.id + action)
     try {
       await api(`/api/ch/timeoff/${t.id}/${action}`, { note })
       toast({ approve: 'Approved', reject: 'Declined', cancel: 'Cancelled' }[action])
       await load()
+      refreshUnread()
     } catch (err) {
       toast(errMsg(err), 'error')
     } finally {
@@ -266,7 +285,8 @@ function TimeOffList() {
   }
 
   const now = new Date()
-  const pending = isAdmin(me) ? (list || []).filter((t) => t.status === 'pending') : []
+  // The owner approves admins' own time off; admins approve everyone else's.
+  const pending = isAdmin(me) ? (list || []).filter((t) => t.status === 'pending' && (t.user !== me.id || isOwner(me))) : []
   const rest = (list || []).filter((t) => !pending.includes(t))
 
   const card = (t: TimeOff, actions?: ReactNode) => {
@@ -287,7 +307,11 @@ function TimeOffList() {
           <Pill tone={st.tone}>{st.t}</Pill>
         </div>
         {t.note && <div className="mt-2 text-[15px] italic text-ios-label2">“{t.note}”</div>}
-        {t.decision_note && <div className="mt-1 text-[15px] text-ios-label2">Admin: “{t.decision_note}”</div>}
+        {t.decision_note && (
+          <div className="mt-1 text-[15px] text-ios-label2">
+            {t.decided_by ? (t.decided_by === me.id ? 'You' : userName(t.decided_by)) : 'Note'}: “{t.decision_note}”
+          </div>
+        )}
         {actions && <div className="mt-3 flex flex-wrap gap-2">{actions}</div>}
       </Card>
     )

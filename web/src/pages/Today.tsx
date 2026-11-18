@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { pb, api, errMsg, isAdmin, isMgr, isNotFound, isOwner, type Shift, type Timecard } from '../lib/pb'
-import { d, fmtDay, fmtDayLong, fmtHours, fmtRange, fmtTime, hoursBetween } from '../lib/dates'
-import { getPosition, GEO_LABEL, GEO_TONE, type Pos } from '../lib/geo'
+import { d, fmtDayLong, fmtDaySoon, fmtHours, fmtRange, fmtTime, hoursBetween } from '../lib/dates'
+import { getPosition, readPosition, GEO_LABEL, GEO_TONE, type Pos } from '../lib/geo'
 import { useData } from '../store'
 import { InstallSheet, isIOS, isStandalone, LocationPicker, NotifyCard, TopActions } from '../chrome'
 import { Avatar, Button, Card, Group, Page, Pill, Row, Sheet, TextRow, toast } from '../ui'
@@ -52,19 +52,38 @@ export default function Today() {
   useEffect(() => {
     load()
     const t = setInterval(() => tick((x) => x + 1), 20000)
-    return () => clearInterval(t)
+    // Coming back to the app (e.g. after an automatic clock-out): show what's true now.
+    const back = () => {
+      if (document.visibilityState === 'visible') load()
+    }
+    document.addEventListener('visibilitychange', back)
+    return () => {
+      clearInterval(t)
+      document.removeEventListener('visibilitychange', back)
+    }
   }, [load])
 
   const clock = async (kind: 'in' | 'out', reason?: string, knownPos?: Pos | null) => {
     setBusy(kind)
     try {
       let pos = knownPos ?? null
+      let blocked = false
       if (knownPos === undefined) {
-        const g = await getPosition()
+        const g = await readPosition()
         pos = g.pos
-        if (!pos && g.error) toast(g.error, 'info')
+        blocked = g.code === 'denied'
+        if (!pos && g.error && !blocked) toast(g.error, 'info')
       }
-      const res = await api<ClockRes>(`/api/ch/clock/${kind}`, { ...(pos || {}), reason })
+      let res = await api<ClockRes>(`/api/ch/clock/${kind}`, { ...(pos || {}), reason })
+      // Location is blocked and it matters here (the location has a time clock spot):
+      // show how to turn it on, then try once more. Where it doesn't matter, nobody is bothered.
+      if (res.needReason && blocked && !reason) {
+        const g = await getPosition()
+        if (g.pos) {
+          pos = g.pos
+          res = await api<ClockRes>(`/api/ch/clock/${kind}`, { ...pos })
+        }
+      }
       if (res.needReason) {
         setReasonFor({ res, pos })
         return
@@ -74,6 +93,7 @@ export default function Today() {
       await load()
     } catch (e) {
       toast(errMsg(e), 'error')
+      load() // e.g. "You're not clocked in" after an automatic clock-out
     } finally {
       setBusy(null)
     }
@@ -87,6 +107,7 @@ export default function Today() {
       await load()
     } catch (e) {
       toast(errMsg(e), 'error')
+      load()
     } finally {
       setBusy(null)
     }
@@ -163,7 +184,7 @@ export default function Today() {
             <div className="mt-2 text-[15px] text-ios-label2">
               {next ? (
                 <>
-                  Next shift: {d(next.starts_at)! <= now ? 'now' : `${fmtDay(next.starts_at)}, ${fmtTime(next.starts_at)}`}
+                  Next shift: {d(next.starts_at)! <= now ? 'now' : `${fmtDaySoon(next.starts_at)}, ${fmtTime(next.starts_at)}`}
                 </>
               ) : (
                 'No upcoming shifts'
@@ -187,7 +208,7 @@ export default function Today() {
               leading={<span className="h-9 w-[5px] shrink-0 rounded-full" style={{ background: position(s.position)?.color || '#8e8e93' }} />}
               title={
                 <span className="font-semibold">
-                  {fmtDay(s.starts_at)} · {fmtRange(s.starts_at, s.ends_at)}
+                  {fmtDaySoon(s.starts_at)} · {fmtRange(s.starts_at, s.ends_at)}
                 </span>
               }
               subtitle={[position(s.position)?.name, section(s.section)?.name, s.notes].filter(Boolean).join(' · ') || undefined}

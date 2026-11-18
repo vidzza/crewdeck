@@ -524,6 +524,114 @@ export function ColorRow({ value, onChange }: { value: string; onChange: (c: str
   )
 }
 
+// ---------- alerts (iOS-style, instead of the browser's confirm/prompt, which show the web address) ----------
+interface AlertReq {
+  title: string
+  message?: string
+  confirm: string
+  cancel: string
+  destructive?: boolean
+  input?: { placeholder?: string; value?: string }
+  /** '' (or the typed text) when confirmed, null when cancelled. */
+  resolve: (v: string | null) => void
+}
+let alertQueue: AlertReq[] = []
+let alertListener: ((a: AlertReq | null) => void) | null = null
+const showNextAlert = () => alertListener?.(alertQueue[0] || null)
+function finishAlert(a: AlertReq, v: string | null) {
+  alertQueue = alertQueue.filter((x) => x !== a)
+  a.resolve(v)
+  showNextAlert()
+}
+function openAlert(a: Omit<AlertReq, 'resolve'>) {
+  return new Promise<string | null>((resolve) => {
+    alertQueue.push({ ...a, resolve })
+    if (alertQueue.length === 1) showNextAlert()
+  })
+}
+/** Asks a yes/no question. Resolves true when they tap the confirm button. */
+export async function ask(o: { title: string; message?: string; confirm?: string; cancel?: string; destructive?: boolean }) {
+  return (await openAlert({ confirm: 'OK', cancel: 'Cancel', ...o })) !== null
+}
+/** Asks for a short text. Resolves the text, or null when cancelled. */
+export function askText(o: { title: string; message?: string; placeholder?: string; value?: string; confirm?: string; cancel?: string }) {
+  return openAlert({ confirm: 'OK', cancel: 'Cancel', ...o, input: { placeholder: o.placeholder, value: o.value } })
+}
+export function Alerts() {
+  const [a, setA] = useState<AlertReq | null>(null)
+  const [text, setText] = useState('')
+  useEffect(() => {
+    alertListener = (x) => {
+      setA(x)
+      setText(x?.input?.value || '')
+    }
+    showNextAlert()
+    return () => {
+      alertListener = null
+    }
+  }, [])
+  useEffect(() => {
+    if (!a) return
+    // Capture phase, so Escape doesn't also close the sheet underneath.
+    const f = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        finishAlert(a, null)
+      }
+    }
+    addEventListener('keydown', f, true)
+    return () => removeEventListener('keydown', f, true)
+  }, [a])
+  if (!a) return null
+  const close = (v: string | null) => finishAlert(a, v)
+  const ok = () => close(a.input ? text : '')
+  return (
+    <div className="animate-fade fixed inset-0 z-[70] flex items-center justify-center bg-black/35 px-12">
+      <form
+        role="alertdialog"
+        aria-modal="true"
+        aria-label={a.title}
+        className="animate-alert w-full max-w-[290px] overflow-hidden rounded-[14px] bg-[#f2f2f7]/95 text-center shadow-2xl backdrop-blur-xl"
+        onSubmit={(e) => {
+          e.preventDefault()
+          ok()
+        }}
+      >
+        <div className="px-4 pb-4 pt-5">
+          <h2 className="text-[17px] font-semibold leading-snug">{a.title}</h2>
+          {a.message && <p className="mt-1 whitespace-pre-line text-[13px] leading-snug text-black/85">{a.message}</p>}
+          {a.input && (
+            <input
+              autoFocus
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onFocus={(e) => a.input?.value && e.target.select()}
+              placeholder={a.input.placeholder}
+              className="mt-3 w-full rounded-[8px] border border-black/10 bg-white px-2.5 py-[7px] text-[15px] outline-none placeholder:text-ios-label3"
+            />
+          )}
+        </div>
+        <div className="grid grid-cols-2 border-t border-black/15">
+          <button
+            type="button"
+            onClick={() => close(null)}
+            className={`min-h-11 border-r border-black/15 px-2 text-[17px] text-ios-blue active:bg-black/5 ${a.destructive ? 'font-semibold' : ''}`}
+          >
+            {a.cancel}
+          </button>
+          <button
+            type="submit"
+            autoFocus={!a.input}
+            className={`min-h-11 px-2 text-[17px] outline-none active:bg-black/5 ${a.destructive ? 'text-ios-red' : 'font-semibold text-ios-blue'}`}
+          >
+            {a.confirm}
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
 // ---------- toasts (iOS-style banner) ----------
 type ToastMsg = { id: number; text: string; tone: 'ok' | 'error' | 'info' }
 let listeners: ((t: ToastMsg[]) => void)[] = []

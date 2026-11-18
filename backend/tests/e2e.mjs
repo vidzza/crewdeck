@@ -353,6 +353,75 @@ await req('POST', '/api/ch/clock/out', {}, TU)
 r = await req('POST', '/api/ch/clock/in', { lat: 19.4326, lng: -99.1332, acc: 10 }, TU)
 ok(r.data?.needReason && r.data.geo === 'outside', "Downtown's location doesn't count for Uptown staff", r.data)
 
+console.log('\n# Own hours, own time off, open covers and leaving the team')
+// Nobody but the owner changes or approves their own hours.
+r = await req('POST', '/api/ch/clock/in', { ...BAR, acc: 10 }, AT)
+ok(r.data?.ok, 'manager clocks in', r.data)
+const andyCard = r.data.timecard
+await req('POST', '/api/ch/clock/out', { ...BAR, acc: 10 }, AT)
+ok((await req('PATCH', `/api/collections/timecards/records/${andyCard}`, { clock_in: new Date(Date.now() - 9 * H).toISOString() }, AT)).status === 403, 'manager can NOT change their own hours')
+const past = (h) => new Date(Date.now() - h * H).toISOString()
+ok((await req('POST', '/api/collections/timecards/records', { user: am.id, location: loc.id, clock_in: past(30), clock_out: past(25) }, AT)).status === 403, 'manager can NOT add hours for themselves')
+r = await req('POST', '/api/collections/timecards/records', { user: e1.id, location: loc.id, clock_in: past(30), clock_out: past(25), approved: true }, AT)
+ok(r.status === 200 && r.data.approved === false && r.data.flagged === true, "a manager's new entry waits for an admin's OK", r.data)
+ok((await req('POST', '/api/collections/timecards/records', { user: ursula.id, location: loc.id, clock_in: past(30), clock_out: past(25) }, AT)).status === 403, "manager can NOT add hours for someone from another location")
+const betoCard = (await req('GET', `/api/collections/timecards/records?filter=${encodeURIComponent(`user="${e1.id}" && in_geo="inside"`)}`, null, OT)).data.items[0]
+ok(betoCard?.approved === true, 'a clock-in at work starts out approved', betoCard)
+r = await req('PATCH', `/api/collections/timecards/records/${betoCard.id}`, { break_min: 30 }, AT)
+ok(r.status === 200 && r.data.approved === false && r.data.flagged === true, "a manager's change goes back to an admin for review", r.data)
+ok((await req('PATCH', `/api/collections/timecards/records/${betoCard.id}`, { user: e2.id }, AT)).status === 403, "manager can NOT move hours to someone else")
+r = await req('POST', '/api/ch/clock/in', { ...BAR, acc: 10 }, GT)
+const ginaCard = r.data.timecard
+await req('POST', '/api/ch/clock/out', { ...BAR, acc: 10 }, GT)
+ok((await req('PATCH', `/api/collections/timecards/records/${ginaCard}`, { break_min: 0, notes: 'x' }, GT)).status === 403, 'admin can NOT change their own hours')
+ok((await req('DELETE', `/api/collections/timecards/records/${ginaCard}`, null, GT)).status === 403, 'admin can NOT delete their own hours')
+ok((await req('PATCH', `/api/collections/timecards/records/${ginaCard}`, { notes: 'checked' }, OT)).status === 200, 'the owner can')
+ok((await req('PATCH', `/api/collections/timecards/records/${ginaCard}`, { break_min: 10 }, AT)).status === 403, "manager can NOT change an admin's hours")
+ok((await req('POST', '/api/collections/timecards/records', { user: gm.id, location: loc.id, clock_in: past(30), clock_out: past(25) }, AT)).status === 403, 'manager can NOT add hours for an admin')
+r = await req('POST', '/api/ch/clock/in', { ...BAR, acc: 10 }, OT)
+const oliviaCard = r.data.timecard
+await req('POST', '/api/ch/clock/out', { ...BAR, acc: 10 }, OT)
+ok((await req('PATCH', `/api/collections/timecards/records/${oliviaCard}`, { break_min: 10 }, GT)).status === 403, "admin can NOT change the owner's hours")
+ok((await req('PATCH', `/api/collections/timecards/records/${oliviaCard}`, { break_min: 10 }, OT)).status === 200, 'the owner fixes their own hours')
+
+// Own time off: the owner approves an admin's.
+const gStart = new Date(Date.now() + 20 * 24 * H)
+r = await req('POST', '/api/ch/timeoff', { starts_at: gStart.toISOString(), ends_at: new Date(gStart.getTime() + 24 * H).toISOString(), kind: 'personal' }, GT)
+const gTo = r.data.id
+ok((await req('POST', `/api/ch/timeoff/${gTo}/approve`, {}, GT)).status === 403, 'admin can NOT approve their own time off')
+ok((await req('POST', `/api/ch/timeoff/${gTo}/approve`, {}, OT)).status === 200, 'the owner approves it')
+ok(!(await req('GET', '/api/collections/notifications/records?perPage=500', null, GT)).data.items.some((n) => n.title.includes('Gina GM requested time off')), "admins aren't notified about their own request")
+
+// An open cover is only for people who work at that location.
+r = await req('POST', '/api/ch/requests', { type: 'cover', shift: betoShift.id }, T1)
+ok(r.status === 200, 'Beto asks anyone to cover', r.data)
+const rqOpen = r.data.id
+ok((await req('POST', `/api/ch/requests/${rqOpen}/accept`, {}, TU)).status === 403, 'someone from another location can NOT take it')
+ok(!(await req('GET', '/api/collections/shift_requests/records', null, TU)).data.items.some((x) => x.id === rqOpen), "and doesn't see it")
+await req('POST', `/api/ch/requests/${rqOpen}/cancel`, {}, T1)
+
+// Copying the same week twice adds nothing; a manager only copies their own locations.
+r = await req('POST', '/api/ch/schedule/copy', { from: wk.toISOString(), to: new Date(wk.getTime() + 7 * 24 * H).toISOString() }, AT)
+ok(r.status === 200 && r.data.copied === 0 && r.data.skipped >= 1, 'copying the same week again adds nothing', r.data)
+ok((await req('POST', '/api/ch/schedule/copy', { from: wk.toISOString(), to: new Date(wk.getTime() + 7 * 24 * H).toISOString(), location: up.id }, AT)).status === 403, "manager can NOT copy another location's week")
+
+// There's always an owner; nobody changes their own level.
+ok((await req('PATCH', `/api/collections/users/records/${owner.record.id}`, { access: 'admin' }, OT)).status === 403, 'the owner can NOT demote themselves')
+ok((await req('PATCH', `/api/collections/users/records/${owner.record.id}`, { active: false }, OT)).status === 403, 'or turn off their own account')
+ok((await req('PATCH', `/api/collections/users/records/${gm.id}`, { access: 'employee' }, GT)).status >= 400, "admins can NOT change their own level")
+
+// Someone leaves: their upcoming shifts open up and their requests are cancelled.
+const dStart = new Date(Date.now() + 9 * 24 * H)
+const dShift = (await req('POST', '/api/collections/shifts/records', { location: loc.id, position: positions[5].id, user: e3.id, starts_at: dStart.toISOString(), ends_at: new Date(dStart.getTime() + 5 * H).toISOString(), published: true }, GT)).data
+r = await req('POST', '/api/ch/requests', { type: 'drop', shift: dShift.id }, T3c)
+ok(r.status === 200, 'Dani asks to drop a shift', r.data)
+const dReq = r.data.id
+ok((await req('PATCH', `/api/collections/users/records/${e3.id}`, { active: false }, GT)).status === 200, 'admin deactivates Dani')
+ok((await req('GET', `/api/collections/shifts/records/${dShift.id}`, null, OT)).data.user === '', "a deactivated person's upcoming shifts become open shifts")
+ok((await req('GET', `/api/collections/shift_requests/records/${dReq}`, null, OT)).data.status === 'cancelled', 'and their open requests are cancelled')
+await req('PATCH', `/api/collections/users/records/${e3.id}`, { active: true }, GT)
+await req('DELETE', `/api/collections/shifts/records/${dShift.id}`, null, GT)
+
 console.log('\n# Auto clock-out')
 const su = (await req('POST', '/api/collections/_superusers/auth-with-password', { identity: 'su@test.com', password: 'superpass123' })).data
 if (su?.token) {

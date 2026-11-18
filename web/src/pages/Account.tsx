@@ -3,7 +3,7 @@ import { pb, errMsg, ACCESS_LABEL } from '../lib/pb'
 import { useData } from '../store'
 import { InstallSheet, NotificationsGroup } from '../chrome'
 import { disablePush } from '../lib/push'
-import { Avatar, Dot, Group, InputRow, Page, Row, Sheet, toast } from '../ui'
+import { ask, Avatar, Dot, Group, InputRow, Page, Row, Sheet, toast } from '../ui'
 
 export default function Account() {
   const { me, positions } = useData()
@@ -38,7 +38,7 @@ export default function Account() {
           tone="destructive"
           center
           onClick={async () => {
-            if (confirm('Sign out of Crewdeck?')) {
+            if (await ask({ title: 'Sign out of Crewdeck?', confirm: 'Sign Out', destructive: true })) {
               // This phone stops getting this person's notifications.
               await disablePush()
               pb.authStore.clear()

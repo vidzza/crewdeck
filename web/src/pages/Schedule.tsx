@@ -23,7 +23,7 @@ import {
 import { useData } from '../store'
 import { LocationPicker, TopActions, WeekBar } from '../chrome'
 import type { User } from '../lib/pb'
-import { Avatar, Banner, Button, Dot, Group, HeaderButton, InputRow, Page, Pill, Row, SelectRow, Sheet, Spinner, SwitchRow, toast } from '../ui'
+import { ask, Avatar, Banner, Button, Dot, Group, HeaderButton, InputRow, Page, Pill, Row, SelectRow, Sheet, Spinner, SwitchRow, toast } from '../ui'
 import { Icon, type IconName } from '../icons'
 
 // Owners and admins work everywhere; people with no locations yet are treated the same.
@@ -184,11 +184,18 @@ export default function Schedule() {
   }
 
   const copyWeek = async () => {
-    if (!confirm("Copy last week's shifts into this week? They'll be added as drafts.")) return
+    if (!(await ask({ title: "Copy last week's shifts?", message: "They're added to this week as drafts. Nobody sees them until you publish.", confirm: 'Copy' }))) return
     setBusy('copy')
     try {
-      const r = await api<{ copied: number }>('/api/ch/schedule/copy', { from: addDays(week, -7).toISOString(), to: week.toISOString(), location: locId })
-      toast(r.copied ? `Copied ${r.copied} shifts` : 'Last week had no shifts', r.copied ? 'ok' : 'info')
+      const r = await api<{ copied: number; skipped?: number }>('/api/ch/schedule/copy', { from: addDays(week, -7).toISOString(), to: week.toISOString(), location: locId })
+      toast(
+        r.copied
+          ? `Copied ${r.copied} shift${r.copied === 1 ? '' : 's'} as drafts${r.skipped ? ` · ${r.skipped} already here` : ''}`
+          : r.skipped
+            ? "Last week's shifts are already in this week"
+            : 'Last week had no shifts',
+        r.copied ? 'ok' : 'info',
+      )
       await load()
     } catch (e) {
       toast(errMsg(e), 'error')
@@ -198,7 +205,7 @@ export default function Schedule() {
   }
 
   const publish = async () => {
-    if (!confirm(`Publish ${drafts} shift${drafts === 1 ? '' : 's'}? Everyone on the schedule gets notified.`)) return
+    if (!(await ask({ title: `Publish ${drafts} shift${drafts === 1 ? '' : 's'}?`, message: 'Everyone on the schedule gets notified.', confirm: 'Publish' }))) return
     setBusy('publish')
     try {
       const r = await api<{ published: number; notified: number }>('/api/ch/schedule/publish', { from: week.toISOString(), to: addDays(week, 7).toISOString(), location: locId })
@@ -872,7 +879,7 @@ function ShiftEditor({
   }
 
   const remove = async () => {
-    if (!shift || !confirm('Delete this shift?')) return
+    if (!shift || !(await ask({ title: 'Delete this shift?', message: shift.published && shift.user ? "They'll get a notification that it was cancelled." : undefined, confirm: 'Delete', destructive: true }))) return
     setBusy(true)
     try {
       await pb.collection('shifts').delete(shift.id)

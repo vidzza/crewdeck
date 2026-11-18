@@ -71,6 +71,16 @@ export function fmtDay(x: Date | string | null) {
   return v ? `${DAYS[v.getDay()]}, ${MONTHS[v.getMonth()]} ${v.getDate()}` : '—'
 }
 
+// "Today", "Tomorrow", or "Thu, Nov 19": for what's coming up soon.
+export function fmtDaySoon(x: Date | string | null) {
+  const v = d(x)
+  if (!v) return '—'
+  const today = startOfDay(new Date())
+  if (sameDay(v, today)) return 'Today'
+  if (sameDay(v, addDays(today, 1))) return 'Tomorrow'
+  return fmtDay(v)
+}
+
 export function fmtRange(a: string | Date, b: string | Date) {
   return `${fmtTime(a)} – ${fmtTime(b)}`
 }

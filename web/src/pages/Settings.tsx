@@ -3,7 +3,7 @@ import { pb, errMsg, API_URL, ACCESS_LABEL, type Loc, type Position, type Sectio
 import { getPosition } from '../lib/geo'
 import { useData } from '../store'
 import { InstallSheet, TopActions } from '../chrome'
-import { Avatar, Button, ColorRow, Dot, Group, HeaderButton, InputRow, Page, Pill, Row, SelectRow, Sheet, Switch, toast, type Option } from '../ui'
+import { ask, Avatar, Button, ColorRow, Dot, Group, HeaderButton, InputRow, Page, Pill, Row, SelectRow, Sheet, Switch, toast, type Option } from '../ui'
 
 const TIME_ZONES: Option[] = [
   { value: 'America/New_York', label: 'Eastern' },
@@ -334,7 +334,7 @@ function SectionSheet({ section, locationId, count, onClose, onSaved }: { sectio
     }
   }
   const remove = async () => {
-    if (!section || !confirm(`Delete “${section.name}”? Shifts in this section keep their time but lose the section.`)) return
+    if (!section || !(await ask({ title: `Delete “${section.name}”?`, message: 'Shifts in this section keep their time but lose the section.', confirm: 'Delete', destructive: true }))) return
     try {
       await pb.collection('sections').delete(section.id)
       toast('Deleted')

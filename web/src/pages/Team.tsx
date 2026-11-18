@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import QRCode from 'qrcode'
 import { pb, api, errMsg, inviteUrl, canManage, isOwner, ACCESS_LABEL, type Access, type PayRate, type User } from '../lib/pb'
 import { useData } from '../store'
-import { Avatar, Banner, Button, Dot, Group, HeaderButton, InputRow, Page, Pill, Row, Segmented, SelectRow, Sheet, Spinner, SwitchRow, toast, type Tone } from '../ui'
+import { askText, ask, Avatar, Banner, Button, Dot, Group, HeaderButton, InputRow, Page, Pill, Row, Segmented, SelectRow, Sheet, Spinner, SwitchRow, toast, type Tone } from '../ui'
 import { Icon } from '../icons'
 
 export const ACCESS_HELP: Record<Access, string> = {
@@ -153,7 +153,19 @@ function PersonSheet({
     if (!f.name.trim()) return toast('Add their name.', 'error')
     if (!f.phone.trim() && !f.email.trim()) return toast('Add a phone number or an email so they can sign in.', 'error')
     if (multi && !allLocations && f.locations.length === 0) return toast('Pick at least one location where they work.', 'error')
-    if (isSelf && canOwner && (!f.active || f.access !== user?.access) && !confirm("You're changing your own access. Are you sure?")) return
+    if (
+      f.access === 'owner' &&
+      user?.access !== 'owner' &&
+      !(await ask({ title: `Make ${f.name.trim()} an owner?`, message: "They'll be able to do everything you can, including changing your access.", confirm: 'Make Owner' }))
+    )
+      return
+    if (
+      user &&
+      user.active &&
+      !f.active &&
+      !(await ask({ title: `Deactivate ${f.name.trim()}?`, message: "They won't be able to sign in, and their upcoming shifts become open shifts.", confirm: 'Deactivate', destructive: true }))
+    )
+      return
     setBusy(true)
     try {
       const body: Record<string, unknown> = {
@@ -240,8 +252,15 @@ function PersonSheet({
             ))}
           </Group>
         )}
-        <Group header="Permissions" footer={ACCESS_HELP[f.access] + (multi && allLocations ? ' Works at all locations.' : '')}>
-          <SelectRow label="Access Level" value={f.access} onChange={(v) => setF({ ...f, access: v as Access })} options={levels.map((a) => ({ value: a, label: ACCESS_LABEL[a] }))} />
+        <Group
+          header="Permissions"
+          footer={ACCESS_HELP[f.access] + (multi && allLocations ? ' Works at all locations.' : '') + (isSelf ? " You can't change your own access level." : '')}
+        >
+          {isSelf ? (
+            <Row title="Access Level" value={ACCESS_LABEL[f.access]} />
+          ) : (
+            <SelectRow label="Access Level" value={f.access} onChange={(v) => setF({ ...f, access: v as Access })} options={levels.map((a) => ({ value: a, label: ACCESS_LABEL[a] }))} />
+          )}
         </Group>
         <Group header="Pay" footer="Optional. Only the owner and admins can see this.">
           <InputRow label="Hourly Rate" type="number" inputMode="decimal" min={0} step="0.01" placeholder="$0.00" value={f.hourly} onChange={(e) => setF({ ...f, hourly: e.target.value })} />
@@ -254,7 +273,7 @@ function PersonSheet({
         </Group>
       )}
       {user && !isSelf && !locked && (
-        <Group footer="Deactivated people can't sign in. Their history stays.">
+        <Group footer="Deactivated people can't sign in, and their upcoming shifts become open shifts. Their past hours stay.">
           <SwitchRow label="Active" checked={f.active} onChange={(v) => setF({ ...f, active: v })} />
         </Group>
       )}
@@ -301,7 +320,7 @@ function InviteSheet({ user, onClose }: { user: User; onClose: () => void }) {
       await navigator.clipboard.writeText(message)
       toast('Copied. Paste it in a message to them.')
     } catch {
-      prompt('Copy this message:', message)
+      askText({ title: 'Copy This Message', message: 'Select the text below and copy it.', value: message, confirm: 'Done', cancel: 'Close' })
     }
   }
   const phoneDigits = user.phone.replace(/[^\d+]/g, '')
@@ -360,13 +379,13 @@ const CAN: { t: string; who: Access[]; note?: string }[] = [
   { t: 'Make, edit or deactivate admins', who: ['owner'] },
   { t: 'Set pay for admins', who: ['owner'] },
   { t: 'Publish schedules and change published shifts', who: ['owner', 'admin'] },
-  { t: 'Approve time off', who: ['owner', 'admin'] },
-  { t: 'Approve clock-ins and hours', who: ['owner', 'admin'] },
+  { t: 'Approve time off', who: ['owner', 'admin'], note: "An admin's own: the owner" },
+  { t: 'Approve clock-ins and hours', who: ['owner', 'admin'], note: "An admin's own: the owner" },
   { t: 'See pay, labor cost and Insights', who: ['owner', 'admin'] },
   { t: 'Add and edit managers and employees', who: ['owner', 'admin'] },
   { t: 'Locations, positions and settings', who: ['owner', 'admin'] },
   { t: 'Build draft schedules', who: ['owner', 'admin', 'manager'], note: 'Managers: at their locations' },
-  { t: 'Fix hours', who: ['owner', 'admin', 'manager'], note: 'Managers: at their locations' },
+  { t: 'Fix hours', who: ['owner', 'admin', 'manager'], note: 'Never your own. Managers: at their locations, then an admin OKs it' },
   { t: 'See the team schedule', who: EVERYONE, note: 'At the locations where they work' },
   { t: 'Clock in, ask for shift changes and time off', who: EVERYONE },
 ]

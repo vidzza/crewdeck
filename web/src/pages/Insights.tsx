@@ -5,7 +5,7 @@ import { pb, errMsg } from '../lib/pb'
 import { addDays, fmtDay, fmtTime, startOfWeek, weekdayShort } from '../lib/dates'
 import { useData } from '../store'
 import { LocationPicker, WeekBar } from '../chrome'
-import { Avatar, Button, Card, Dot, Group, InputRow, Page, Pill, Row, Segmented, Sheet, Spinner, toast } from '../ui'
+import { askText, ask, Avatar, Button, Card, Dot, Group, InputRow, Page, Pill, Row, Segmented, Sheet, Spinner, toast } from '../ui'
 import { Icon, type IconName } from '../icons'
 
 interface Totals {
@@ -372,7 +372,7 @@ export function ApiAccessPage() {
     load()
   }, [load])
   const revoke = async (k: ApiKey) => {
-    if (!confirm(`Revoke “${k.name}”? Anything using this key stops working right away.`)) return
+    if (!(await ask({ title: `Revoke “${k.name}”?`, message: 'Anything using this key stops working right away.', confirm: 'Revoke', destructive: true }))) return
     try {
       await pb.send(`/api/ch/api-keys/${k.id}`, { method: 'DELETE' })
       toast('Key revoked')
@@ -436,7 +436,7 @@ function CreateKeySheet({ onClose }: { onClose: () => void }) {
       await navigator.clipboard.writeText(key)
       toast('Key copied')
     } catch {
-      prompt('Copy this key:', key)
+      askText({ title: 'Copy This Key', message: 'Select the key below and copy it.', value: key, confirm: 'Done', cancel: 'Close' })
     }
   }
   if (key)

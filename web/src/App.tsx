@@ -1,7 +1,7 @@
 import { useEffect, useState, type ComponentType } from 'react'
 import { pb, currentUser, isAdmin, type User } from './lib/pb'
 import { DataProvider, useData } from './store'
-import { Spinner, Toaster } from './ui'
+import { Alerts, Spinner, Toaster } from './ui'
 import { Icon, type IconName } from './icons'
 import Login from './pages/Login'
 import Today from './pages/Today'
@@ -90,6 +90,7 @@ export default function App() {
         <Join token={path.slice('/join/'.length)} />
         <LocationHelp />
         <Toaster />
+        <Alerts />
       </>
     )
 
@@ -106,6 +107,7 @@ export default function App() {
       )}
       <LocationHelp />
       <Toaster />
+      <Alerts />
     </>
   )
 }
@@ -119,7 +121,7 @@ function wantsWelcome() {
 }
 
 function Shell() {
-  const { me, loaded, unread } = useData()
+  const { me, loaded, unread, todo } = useData()
   const path = useHashPath()
   const [welcome, setWelcome] = useState(wantsWelcome)
   const locId = path.startsWith('/settings/locations/') ? path.slice('/settings/locations/'.length) : ''
@@ -156,7 +158,17 @@ function Shell() {
                 href={`#${t.path}`}
                 className={`flex h-[52px] flex-1 flex-col items-center justify-center gap-[3px] text-[10.5px] font-medium ${active ? 'text-ios-blue' : 'text-ios-gray'}`}
               >
-                <Icon name={t.icon} size={25} stroke={active ? 2.2 : 1.8} />
+                <span className="relative">
+                  <Icon name={t.icon} size={25} stroke={active ? 2.2 : 1.8} />
+                  {t.path === '/requests' && todo > 0 && (
+                    <span
+                      aria-label={`${todo} waiting for you`}
+                      className="absolute -right-2.5 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-ios-red px-[5px] text-[12px] font-semibold leading-none text-white"
+                    >
+                      {todo > 99 ? '99+' : todo}
+                    </span>
+                  )}
+                </span>
                 {t.label}
               </a>
             )

@@ -16,6 +16,8 @@ interface Data {
   setCurrentLocation: (id: string) => void
   loaded: boolean
   unread: number
+  /** Requests waiting for this person: asked of them, or theirs to approve. */
+  todo: number
   reload: () => Promise<void>
   refreshUnread: () => void
   userName: (id: string) => string
@@ -44,6 +46,7 @@ export function DataProvider({ me, children }: { me: User; children: ReactNode }
   const [locId, setLocId] = useState(savedLocation)
   const [loaded, setLoaded] = useState(false)
   const [unread, setUnread] = useState(0)
+  const [todo, setTodo] = useState(0)
 
   const reload = useCallback(async () => {
     const [c, u, p, s, l] = await Promise.all([
@@ -61,12 +64,29 @@ export function DataProvider({ me, children }: { me: User; children: ReactNode }
     setLoaded(true)
   }, [])
 
+  const myId = me.id
+  const access = me.access
   const refreshUnread = useCallback(() => {
     pb.collection('notifications')
       .getList(1, 1, { filter: 'read = false' })
       .then((r) => setUnread(r.totalItems))
       .catch(() => {})
-  }, [])
+    // Things waiting for this person (the badge on the Requests tab).
+    const count = (coll: string, filter: string) =>
+      pb
+        .collection(coll)
+        .getList(1, 1, { filter })
+        .then((r) => r.totalItems)
+        .catch(() => 0)
+    const asked = pb.filter('status = "pending_peer" && target_user = {:me}', { me: myId })
+    Promise.all([
+      count('shift_requests', asked),
+      access === 'owner' ? count('shift_requests', 'status = "pending_admin"') : Promise.resolve(0),
+      access === 'owner' || access === 'admin'
+        ? count('time_off', access === 'owner' ? 'status = "pending"' : pb.filter('status = "pending" && user != {:me}', { me: myId }))
+        : Promise.resolve(0),
+    ]).then(([a, b, c]) => setTodo(a + b + c))
+  }, [myId, access])
 
   useEffect(() => {
     reload().catch(() => setLoaded(true))
@@ -108,6 +128,7 @@ export function DataProvider({ me, children }: { me: User; children: ReactNode }
       setCurrentLocation,
       loaded,
       unread,
+      todo,
       reload,
       refreshUnread,
       userName: (id) => (id ? um.get(id)?.name || um.get(id)?.email || 'Someone' : 'Open Shift'),
@@ -115,7 +136,7 @@ export function DataProvider({ me, children }: { me: User; children: ReactNode }
       section: (id) => sm.get(id),
       locationName: (id) => lm.get(id)?.name || '',
     }
-  }, [me, company, users, positions, sections, locations, locId, setCurrentLocation, loaded, unread, reload, refreshUnread])
+  }, [me, company, users, positions, sections, locations, locId, setCurrentLocation, loaded, unread, todo, reload, refreshUnread])
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

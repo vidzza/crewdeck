@@ -5,7 +5,7 @@ import { detectPlatform, getPosition, readPosition, setLocationHelp, type Platfo
 import { disablePush, enablePush, pushStatus, sendTestPush, type PushStatus } from './lib/push'
 import { errMsg } from './lib/pb'
 import { useData } from './store'
-import { Avatar, Button, Card, Group, HeaderButton, Row, Sheet, Spinner, Switch, toast } from './ui'
+import { askText, Avatar, Button, Card, Group, HeaderButton, Row, Sheet, Spinner, Switch, toast } from './ui'
 import { Icon } from './icons'
 
 // Bell + avatar in the top-right corner of every main screen.
@@ -538,7 +538,7 @@ function LocationHelpSheet({ timeout, onFinish }: { timeout: number; onFinish: (
       await navigator.clipboard.writeText(window.location.href)
       toast('Link copied')
     } catch {
-      prompt('Copy this link:', window.location.href)
+      askText({ title: 'Copy This Link', message: 'Select the link below and copy it.', value: window.location.href, confirm: 'Done', cancel: 'Close' })
     }
   }
 

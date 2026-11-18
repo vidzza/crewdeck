@@ -52,6 +52,13 @@ function normPhone(p) {
 function userLocs(u) {
   return u ? u.getStringSlice("locations") : []
 }
+// Owners and admins work everywhere; others at their locations (none set = everywhere).
+function worksAt(u, locId) {
+  if (!u) return false
+  if (!locId || isAdmin(u)) return true
+  const locs = userLocs(u)
+  return locs.length === 0 || locs.indexOf(locId) >= 0
+}
 function companyName(app) {
   const c = app.findRecordsByFilter("company", "", "created", 1, 0)
   return c.length ? c[0].getString("name") : ""
@@ -150,8 +157,10 @@ function telegram(text) {
     console.log("telegram error", err)
   }
 }
-function notifyAdmins(app, title, text, link) {
-  notify(app, adminIds(app), title, text, link)
+// exclude: people who shouldn't be told (usually whoever just did it).
+function notifyAdmins(app, title, text, link, exclude) {
+  const skip = exclude || []
+  notify(app, adminIds(app).filter((id) => skip.indexOf(id) < 0), title, text, link)
   telegram(title + (text ? "\n" + text : ""))
 }
 // Shift changes and open-shift pickups are approved by the owner only.
@@ -173,6 +182,17 @@ function guardPay(app, e, userIds) {
   userIds.forEach((id) => {
     const target = findById(app, "users", id)
     if (target && !canManage(me, target)) throw new ForbiddenError("Only the owner can set pay for admins and the owner.")
+  })
+}
+// Hours follow the team hierarchy: only the owner changes their own hours, an admin's or the owner's.
+function guardHours(app, actor, userIds) {
+  if (!actor || actor.collection().name !== "users" || isOwner(actor)) return // owner or dashboard superuser
+  userIds.forEach((id) => {
+    if (!id) return
+    if (id === actor.id)
+      throw new ForbiddenError(isAdmin(actor) ? "Ask the owner to change or approve your own hours." : "Ask an admin or the owner to fix your own hours.")
+    const t = findById(app, "users", id)
+    if (t && isAdmin(t)) throw new ForbiddenError("Only the owner changes an admin's hours.")
   })
 }
 function audit(app, actorId, action, coll, id, data) {
@@ -438,6 +458,35 @@ function sendReminders(app) {
   })
 }
 
+// ---------- someone leaves (deactivated or deleted) ----------
+// Their upcoming shifts become open shifts, their open shift requests are cancelled
+// and their sign-in links stop working. Past hours and shifts stay as they are.
+function offboard(app, userId, actorId) {
+  const now = new Date()
+  const shifts = app.findRecordsByFilter("shifts", "user = {:u} && starts_at > {:now}", "starts_at", 0, 0, { u: userId, now: pbDate(now) })
+  shifts.forEach((s) => {
+    s.set("user", "")
+    app.save(s)
+  })
+  app
+    .findRecordsByFilter(
+      "shift_requests",
+      "(requester = {:u} || target_user = {:u}) && (status = 'pending_peer' || status = 'pending_admin')",
+      "",
+      0,
+      0,
+      { u: userId },
+    )
+    .forEach((r) => {
+      r.set("status", "cancelled")
+      r.set("decision_note", "Cancelled because the person is no longer on the team")
+      app.save(r)
+    })
+  app.findRecordsByFilter("invites", "user = {:u}", "", 0, 0, { u: userId }).forEach((i) => app.delete(i))
+  if (shifts.length) audit(app, actorId, "user.offboard", "users", userId, { opened_shifts: shifts.map((s) => s.id) })
+  return shifts.length
+}
+
 // ---------- shifts ----------
 function overlappingShifts(app, userId, s, e, excludeIds) {
   if (!userId) return []
@@ -471,6 +520,7 @@ module.exports = {
   isAdmin,
   canManage,
   guardPay,
+  guardHours,
   isMgr,
   requireUser,
   requireAdmin,
@@ -479,6 +529,7 @@ module.exports = {
   uid,
   normPhone,
   userLocs,
+  worksAt,
   companyName,
   pbDate,
   toDate,
@@ -501,6 +552,7 @@ module.exports = {
   sendReminders,
   conflictsFor,
   overlappingShifts,
+  offboard,
   checkGeo,
   distM,
 }

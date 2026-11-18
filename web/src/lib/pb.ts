@@ -102,6 +102,7 @@ export interface TimeOff extends Base {
   kind: TimeOffKind
   note: string
   status: 'pending' | 'approved' | 'rejected' | 'cancelled'
+  decided_by: string
   decision_note: string
 }
 export type Geo = 'inside' | 'uncertain' | 'outside' | 'low_accuracy' | 'no_gps' | 'not_configured' | 'manual' | ''

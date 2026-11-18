@@ -208,10 +208,7 @@ routerAdd(
       if (shift.getString("user") !== u.id) throw new ForbiddenError("That's not your shift.")
     }
     const locId = shift.getString("location")
-    const worksHere = (person) => {
-      const locs = L.userLocs(person)
-      return locs.length === 0 || locs.indexOf(locId) >= 0
-    }
+    const worksHere = (person) => L.worksAt(person, locId)
     if (type === "pickup" && !worksHere(u)) throw new ForbiddenError("You don't work at this location.")
     if (type === "cover" && b.target_user) {
       const t = L.findById($app, "users", b.target_user)
@@ -224,6 +221,10 @@ routerAdd(
       if (!targetShift || !targetShift.getBool("published") || !targetShift.getString("user")) throw new BadRequestError("Pick the shift you want to swap for.")
       if (targetShift.getString("user") === u.id) throw new BadRequestError("That shift is already yours.")
       if (L.getDate(targetShift, "starts_at").getTime() <= now.getTime()) throw new BadRequestError("The other shift has already started.")
+      if (!L.worksAt(u, targetShift.getString("location"))) throw new BadRequestError("You don't work at the location of that shift.")
+      const other = L.findById($app, "users", targetShift.getString("user"))
+      if (!other || !other.getBool("active")) throw new BadRequestError("Pick the shift you want to swap for.")
+      if (!worksHere(other)) throw new BadRequestError(other.getString("name") + " doesn't work at this location.")
       targetUser = targetShift.getString("user")
     }
 
@@ -286,6 +287,8 @@ routerAdd(
       if (requester === u.id) throw new BadRequestError("You can't accept your own request.")
       const target = r.getString("target_user")
       if (target && target !== u.id) throw new ForbiddenError("This request isn't for you.")
+      if (!target && !L.worksAt(u, shift.getString("location"))) throw new ForbiddenError("You don't work at this location.")
+      if (L.getDate(shift, "starts_at").getTime() <= now.getTime()) throw new BadRequestError("That shift has already started.")
       if (type === "swap") {
         const ts = L.findById($app, "shifts", r.getString("target_shift"))
         if (!ts || ts.getString("user") !== u.id) throw new BadRequestError("Your shift changed; this swap is no longer possible.")
@@ -409,6 +412,7 @@ routerAdd(
       "🌴 " + L.userName($app, userId) + " requested time off",
       L.fmtDay(s) + " to " + L.fmtDay(new Date(en.getTime() - 1000)) + (shifts.length ? " · Has " + shifts.length + " shift(s) on those dates" : ""),
       "#/timeoff",
+      [u.id],
     )
     return e.json(200, { ok: true, id: r.id, shiftsInRange: shifts.length })
   },
@@ -436,13 +440,18 @@ routerAdd(
       if (status === "pending" || (status === "approved" && s.getTime() > now.getTime())) {
         r.set("status", "cancelled")
         $app.save(r)
-        if (status === "approved") L.notifyAdmins($app, "🌴 " + L.userName($app, owner) + " cancelled approved time off", range, "#/timeoff")
+        if (status === "approved") {
+          const title = owner === u.id ? L.userName($app, owner) + " cancelled approved time off" : (u.getString("name") || "Someone") + " cancelled " + L.userName($app, owner) + "'s time off"
+          L.notifyAdmins($app, "🌴 " + title, range, "#/timeoff", [u.id])
+          if (owner !== u.id) L.notify($app, [owner], "Your time off was cancelled", range, "#/timeoff")
+        }
         return e.json(200, { ok: true })
       }
       throw new BadRequestError("It can no longer be cancelled.")
     }
     if (action === "approve" || action === "reject") {
       if (!L.isAdmin(u)) throw new ForbiddenError("Only the owner or an admin can approve time off.")
+      if (owner === u.id && !L.isOwner(u)) throw new ForbiddenError("The owner approves your own time off.")
       if (status !== "pending") throw new BadRequestError("This request has already been resolved.")
       r.set("status", action === "approve" ? "approved" : "rejected")
       r.set("decided_by", u.id)
@@ -510,25 +519,49 @@ routerAdd(
     const from = L.toDate(b.from)
     const to = L.toDate(b.to)
     if (!from || !to) throw new BadRequestError("Invalid date range.")
-    const offset = to.getTime() - from.getTime()
-    const end = new Date(from.getTime() + 7 * 24 * 3600 * 1000)
-    if (b.location && !L.isAdmin(u) && L.userLocs(u).indexOf(String(b.location)) < 0) throw new ForbiddenError("You don't manage this location.")
-    const src = $app.findRecordsByFilter(
-      "shifts",
-      "starts_at >= {:f} && starts_at < {:t}" + (b.location ? " && location = {:l}" : ""),
-      "starts_at",
-      0,
-      0,
-      { f: L.pbDate(from), t: L.pbDate(end), l: String(b.location || "") },
-    )
+    // Move by whole calendar days (local time), so a 9 PM shift stays at 9 PM across daylight-saving changes.
+    const days = Math.round((to.getTime() - from.getTime()) / (24 * 3600 * 1000))
+    const shiftDays = (d) => {
+      const x = new Date(d.getTime())
+      x.setDate(x.getDate() + days)
+      return x
+    }
+    const end = new Date(from.getTime())
+    end.setDate(end.getDate() + 7)
+    const loc = String(b.location || "")
+    if (loc && !L.worksAt(u, loc)) throw new ForbiddenError("You don't manage this location.")
+    const inScope = (s) => (loc ? true : L.worksAt(u, s.getString("location")))
+    const q = "starts_at >= {:f} && starts_at < {:t}" + (loc ? " && location = {:l}" : "")
+    const src = $app.findRecordsByFilter("shifts", q, "starts_at", 0, 0, { f: L.pbDate(from), t: L.pbDate(end), l: loc }).filter(inScope)
+    // Shifts already in the target week aren't copied twice.
+    const key = (locId, userId, posId, s, en) => [locId, userId, posId, s.getTime(), en.getTime()].join("|")
+    const there = {}
+    $app
+      .findRecordsByFilter("shifts", q, "", 0, 0, { f: L.pbDate(shiftDays(from)), t: L.pbDate(shiftDays(end)), l: loc })
+      .forEach((s) => (there[key(s.getString("location"), s.getString("user"), s.getString("position"), L.getDate(s, "starts_at"), L.getDate(s, "ends_at"))] = true))
+    const people = {}
+    const person = (id) => (id in people ? people[id] : (people[id] = L.findById($app, "users", id)))
     const col = $app.findCollectionByNameOrId("shifts")
     let n = 0
+    let skipped = 0
     $app.runInTransaction((tx) => {
       src.forEach((s) => {
-        const ns = new Date(L.getDate(s, "starts_at").getTime() + offset)
-        const ne = new Date(L.getDate(s, "ends_at").getTime() + offset)
+        const ns = shiftDays(L.getDate(s, "starts_at"))
+        const ne = shiftDays(L.getDate(s, "ends_at"))
+        const locId = s.getString("location")
+        // People who left or no longer work here: their copied shift becomes an open shift.
+        let userId = s.getString("user")
+        const p = userId ? person(userId) : null
+        if (userId && (!p || !p.getBool("active") || !L.worksAt(p, locId))) userId = ""
+        const k = key(locId, userId, s.getString("position"), ns, ne)
+        if (there[k]) {
+          skipped++
+          return
+        }
+        there[k] = true
         const r = new Record(col)
-        ;["location", "section", "position", "user", "notes"].forEach((f) => r.set(f, s.get(f)))
+        ;["location", "section", "position", "notes"].forEach((f) => r.set(f, s.get(f)))
+        r.set("user", userId)
         r.set("starts_at", ns.toISOString())
         r.set("ends_at", ne.toISOString())
         r.set("published", false)
@@ -537,7 +570,7 @@ routerAdd(
         n++
       })
     })
-    return e.json(200, { ok: true, copied: n })
+    return e.json(200, { ok: true, copied: n, skipped: skipped })
   },
   $apis.requireAuth("users"),
 )
@@ -565,12 +598,19 @@ onRecordUpdateRequest((e) => {
   const before = e.record.original()
   e.next()
   const L = require(`${__hooks}/lib.js`)
-  if (!before.getBool("published") && !e.record.getBool("published")) return
+  const wasPub = before.getBool("published")
+  const isPub = e.record.getBool("published")
+  if (!wasPub && !isPub) return
   const oldU = before.getString("user")
   const newU = e.record.getString("user")
   const timeChanged =
     before.getString("starts_at") !== e.record.getString("starts_at") || before.getString("ends_at") !== e.record.getString("ends_at")
-  if (oldU !== newU) {
+  if (!wasPub) {
+    // A single draft shift was published.
+    if (newU) L.notify($app, [newU], "You were assigned a shift", L.fmtShift(e.record), "#/schedule")
+  } else if (!isPub) {
+    if (oldU) L.notify($app, [oldU], "One of your shifts was cancelled", L.fmtShift(before), "#/schedule")
+  } else if (oldU !== newU) {
     if (oldU) L.notify($app, [oldU], "You were taken off a shift", L.fmtShift(before), "#/schedule")
     if (newU) L.notify($app, [newU], "You were assigned a shift", L.fmtShift(e.record), "#/schedule")
   } else if (timeChanged && newU) {
@@ -597,7 +637,8 @@ onRecordDeleteRequest((e) => {
   }
 }, "shifts")
 
-// Every hours correction is flagged and logged.
+// Every hours correction is flagged and logged. Only the owner changes or approves their own
+// hours or an admin's, and a manager's change goes back to "needs review" for an admin.
 onRecordUpdateRequest((e) => {
   const L = require(`${__hooks}/lib.js`)
   const me = L.uid(e)
@@ -606,6 +647,18 @@ onRecordUpdateRequest((e) => {
     before.getString("clock_in") !== e.record.getString("clock_in") ||
     before.getString("clock_out") !== e.record.getString("clock_out") ||
     before.getFloat("break_min") !== e.record.getFloat("break_min")
+  if (me) {
+    const actor = e.auth
+    L.guardHours($app, actor, [before.getString("user"), e.record.getString("user")])
+    if (!L.isAdmin(actor)) {
+      if (before.getString("user") !== e.record.getString("user")) throw new ForbiddenError("Only an admin can move hours to someone else.")
+      if (changedTimes) {
+        e.record.set("approved", false)
+        e.record.set("flagged", true)
+        e.record.set("flag_reason", "Changed by " + (actor.getString("name") || "a manager") + ". Needs an admin's OK.")
+      }
+    }
+  }
   if (changedTimes) {
     e.record.set("edited", true)
     e.record.set("edited_by", me)
@@ -621,10 +674,36 @@ onRecordUpdateRequest((e) => {
 onRecordCreateRequest((e) => {
   // Timecards created by hand (manager or dashboard) are marked as manual.
   const L = require(`${__hooks}/lib.js`)
+  const me = L.uid(e)
+  if (me) {
+    const actor = e.auth
+    const forId = e.record.getString("user")
+    L.guardHours($app, actor, [forId])
+    if (!L.isAdmin(actor)) {
+      const person = L.findById($app, "users", forId)
+      if (!person || !L.worksAt(person, e.record.getString("location"))) throw new ForbiddenError("They don't work at this location.")
+      e.record.set("approved", false)
+      e.record.set("flagged", true)
+      e.record.set("flag_reason", "Added by " + (actor.getString("name") || "a manager") + ". Needs an admin's OK.")
+    }
+  }
   e.record.set("in_geo", "manual")
   e.record.set("edited", true)
-  e.record.set("edited_by", L.uid(e))
+  e.record.set("edited_by", me)
   e.next()
+}, "timecards")
+
+// Deleting hours follows the same rules (owner/admins only, never your own unless you're the owner).
+onRecordDeleteRequest((e) => {
+  const L = require(`${__hooks}/lib.js`)
+  const me = L.uid(e)
+  L.guardHours($app, e.auth, [e.record.getString("user")])
+  e.next()
+  L.audit($app, me, "timecard.delete", "timecards", e.record.id, {
+    user: e.record.getString("user"),
+    in: e.record.getString("clock_in"),
+    out: e.record.getString("clock_out"),
+  })
 }, "timecards")
 
 // People: keep the phone sign-in key in sync and make sure there's a way to reach them.
@@ -642,10 +721,22 @@ onRecordCreateRequest((e) => {
 
 onRecordUpdateRequest((e) => {
   const L = require(`${__hooks}/lib.js`)
+  const me = L.uid(e)
+  const before = e.record.original()
+  if (me && e.record.id === me) {
+    if (before.getString("access") !== e.record.getString("access")) throw new ForbiddenError("You can't change your own access level.")
+    if (before.getBool("active") !== e.record.getBool("active")) throw new ForbiddenError("You can't turn off your own account.")
+  }
+  // There's always at least one active owner (only the owner approves shift changes).
+  const wasOwner = before.getString("access") === "owner" && before.getBool("active")
+  const stillOwner = e.record.getString("access") === "owner" && e.record.getBool("active")
+  if (wasOwner && !stillOwner && L.ownerIds($app).filter((id) => id !== e.record.id).length === 0)
+    throw new BadRequestError("There must always be an owner. Make someone else the owner first.")
   e.record.set("phone_login", L.normPhone(e.record.getString("phone")))
   if (!e.record.getString("email") && !e.record.getString("phone_login"))
     throw new BadRequestError("Keep a phone number or an email so they can sign in.")
   e.next()
+  if (before.getBool("active") && !e.record.getBool("active")) L.offboard($app, e.record.id, me)
 }, "users")
 
 // Pay: admins set wages for managers and employees only. Their own pay, other admins'
