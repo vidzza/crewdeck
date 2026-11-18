@@ -185,6 +185,10 @@ export function Row({
   )
 }
 
+// On phones a field never focuses by itself: the keyboard would pop up while a sheet is still sliding in,
+// and iPhone then scrolls the top of the form off the screen. People tap the field they want instead.
+const canAutoFocus = () => typeof matchMedia === 'function' && matchMedia('(hover: hover) and (pointer: fine)').matches
+
 export function InputRow({ label, suffix, ...p }: { label?: string; suffix?: string } & InputHTMLAttributes<HTMLInputElement>) {
   const picker = p.type === 'date' || p.type === 'time' || p.type === 'datetime-local'
   return (
@@ -192,6 +196,7 @@ export function InputRow({ label, suffix, ...p }: { label?: string; suffix?: str
       {label && <span className="shrink-0 text-[17px]">{label}</span>}
       <input
         {...p}
+        autoFocus={!!p.autoFocus && canAutoFocus()}
         className={`bg-transparent py-[11px] text-[17px] outline-none placeholder:text-ios-label3 ${picker ? 'ml-auto w-auto min-w-0 flex-none' : 'min-w-0 flex-1'} ${
           label ? 'text-right text-ios-label2 focus:text-black' : ''
         }`}
@@ -451,6 +456,8 @@ export function Sheet({
         role="dialog"
         aria-label={title}
         className="animate-sheet flex max-h-[94vh] w-full flex-col overflow-hidden rounded-t-[14px] bg-ios-gray6 shadow-2xl sm:max-w-lg sm:rounded-[14px]"
+        // The screen you can actually see (not counting Safari's bars), and below the status bar / notch.
+        style={{ maxHeight: 'calc(100dvh - env(safe-area-inset-top) - 12px)' }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-center pt-[6px] sm:hidden">
@@ -472,7 +479,7 @@ export function Sheet({
               ))}
           </div>
         </div>
-        <div className="space-y-7 overflow-y-auto px-4 pb-10 pt-3" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 32px)' }}>
+        <div className="space-y-7 overflow-y-auto overscroll-contain px-4 pb-10 pt-3" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 32px)' }}>
           {children}
         </div>
       </div>
