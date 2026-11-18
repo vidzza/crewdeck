@@ -1,0 +1,13 @@
+{
+  "name": "crewdeck-duo-check",
+  "private": true,
+  "description": "Checks every Crewdeck screen in WebKit (Safari's engine) at iPhone Duo sizes. Run ./run.sh",
+  "type": "module",
+  "scripts": {
+    "setup": "playwright-core install webkit",
+    "check": "./run.sh"
+  },
+  "devDependencies": {
+    "playwright-core": "1.64.1"
+  }
+}

@@ -177,7 +177,7 @@ export default function Today() {
         )}
       </Card>
 
-      <Group header="Upcoming Shifts" headerRight={<a href="#/schedule" className="text-ios-blue normal-case">See All</a>}>
+      <Group header="Upcoming Shifts" headerRight={<a href="#/schedule" className="-my-3 -mr-2 inline-flex min-h-11 items-center px-2 text-ios-blue normal-case">See All</a>}>
         {shifts.length === 0 ? (
           <Row title={<span className="text-ios-label2">No upcoming shifts</span>} />
         ) : (
@@ -348,7 +348,7 @@ function SetupChecklist() {
         <h2 className="text-[13px] uppercase tracking-wide text-ios-label2">
           Get Set Up · {done} of {steps.length}
         </h2>
-        <button type="button" onClick={hide} className="text-[13px] text-ios-blue">
+        <button type="button" onClick={hide} className="-my-3 -mr-2 inline-flex min-h-11 items-center px-2 text-[13px] text-ios-blue">
           Hide
         </button>
       </div>

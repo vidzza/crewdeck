@@ -33,6 +33,16 @@ function worksAt(u: User, locId: string) {
 
 const KIND_LABEL: Record<string, string> = { vacation: 'Vacation', sick: 'Sick', personal: 'Personal', unpaid: 'Unpaid' }
 const GRAY = '#8e8e93'
+// "Gina Garcia" → "Gina G." when the name column is narrow.
+const shortName = (n: string) => {
+  const [first, ...rest] = n.trim().split(/\s+/)
+  return rest.length ? `${first} ${rest[rest.length - 1][0]}.` : first
+}
+// Long positions in small shift boxes: "General Manager" → "GM", "Assistant Manager" → "AM".
+const shortPosition = (n: string) => {
+  const words = n.trim().split(/\s+/)
+  return n.length > 11 && words.length > 1 ? words.map((w) => w[0].toUpperCase()).join('') : n
+}
 const overlapsDay = (t: TimeOff, day: Date) => d(t.starts_at)! < addDays(day, 1) && d(t.ends_at)! > day
 const shiftHours = (s: Shift) => hoursBetween(s.starts_at, s.ends_at)
 
@@ -225,7 +235,7 @@ export default function Schedule() {
               tone={stats.overtime ? 'orange' : undefined}
             />
             {isAdmin(me) ? (
-              <Stat label="Labor" value={rates.size ? `$${Math.round(stats.cost).toLocaleString('en-US')}` : '—'} sub={rates.size ? 'Estimated, overtime at 1.5×' : 'Add pay rates in Team'} />
+              <Stat label="Labor" value={rates.size ? money(stats.cost) : '—'} sub={rates.size ? 'Estimated' : 'Add pay rates in Team'} />
             ) : (
               <Stat label="Drafts" value={String(drafts)} sub="Not published yet" />
             )}
@@ -386,12 +396,17 @@ export default function Schedule() {
   }
 }
 
+// "$3,718", or "$12.3k" once it gets long, so it never gets cut off on a small screen.
+const money = (n: number) => (n >= 10000 ? `$${(n / 1000).toFixed(1).replace(/\.0$/, '')}k` : `$${Math.round(n).toLocaleString('en-US')}`)
+
 // One row of numbers for the week. On phones only the number and its name, to keep the grid in view.
 function Stat({ label, value, sub, tone }: { label: string; value: string; sub: string; tone?: 'blue' | 'orange' }) {
   const color = tone === 'blue' ? 'text-ios-blue' : tone === 'orange' ? 'text-[#c93400]' : ''
   return (
-    <div className="min-w-0 px-1.5 text-center sm:px-4 sm:text-left" title={sub}>
-      <div className={`tabular truncate text-[19px] font-bold leading-tight sm:text-[22px] ${color}`}>{value}</div>
+    <div className="min-w-0 px-1 text-center sm:px-4 sm:text-left" title={sub}>
+      <div data-time className={`tabular text-[17px] font-bold leading-tight min-[400px]:text-[19px] sm:text-[22px] ${color}`}>
+        {value}
+      </div>
       <div className="truncate text-[12px] font-medium text-ios-label2 sm:text-[13px]">{label}</div>
       <div className="hidden truncate text-[12px] text-ios-label3 sm:block">{sub}</div>
     </div>
@@ -462,8 +477,9 @@ function WeekGrid({
 }) {
   const { me, users, userName, position } = useData()
   const [ref, width] = useWidth()
-  // Small phones (and the iPhone Duo's outer screen) get a narrower name column so times stay readable.
-  const nameW = width >= 900 ? 190 : width >= 640 ? 150 : width >= 400 ? 84 : width >= 330 ? 66 : 54
+  // The name column grows with the screen (a fifth of it): narrow on phones so times stay readable,
+  // roomy on the iPhone Duo's inner screen, iPad and computers.
+  const nameW = width ? Math.round(Math.min(190, Math.max(54, width * 0.2))) : 66
   const cellW = width ? (width - nameW) / 7 : 0
   const density: Density = cellW >= 104 ? 'full' : cellW >= 62 ? 'medium' : 'compact'
   const cols = { gridTemplateColumns: `${nameW}px repeat(7, minmax(0, 1fr))` }
@@ -492,19 +508,24 @@ function WeekGrid({
     if (density === 'compact')
       return (
         <div className="min-w-0 px-2 py-1.5">
-          <div className={`truncate text-[13px] font-semibold leading-tight ${uid === me.id ? 'text-ios-blue' : ''}`}>{name.split(' ')[0]}</div>
+          <div data-name className={`truncate text-[13px] font-semibold leading-tight ${uid === me.id ? 'text-ios-blue' : ''}`}>
+            {name.split(' ')[0]}
+          </div>
           <div className="text-[11px] leading-tight text-ios-label2">{hours}</div>
         </div>
       )
+    const roomy = nameW >= 150
     return (
       <div className="flex min-w-0 items-center gap-2 px-3 py-2">
         {nameW >= 190 && <Avatar name={userName(uid)} size={30} />}
         <div className="min-w-0">
-          <div className={`truncate text-[15px] font-semibold leading-tight ${uid === me.id ? 'text-ios-blue' : ''}`}>{name}</div>
+          <div data-name className={`truncate text-[15px] font-semibold leading-tight ${uid === me.id ? 'text-ios-blue' : ''}`}>
+            {roomy ? name : shortName(name)}
+          </div>
           <div className="truncate text-[12px] leading-tight text-ios-label2">
             {hours}
-            {over && ' · overtime'}
-            {!over && pos && nameW >= 150 ? ` · ${pos.name}` : ''}
+            {over && roomy && ' · overtime'}
+            {!over && pos && roomy ? ` · ${pos.name}` : ''}
           </div>
         </div>
       </div>
@@ -586,7 +607,7 @@ function WeekGrid({
         row(
           '',
           <div className="min-w-0 px-2 py-1.5">
-            <div className={`truncate font-semibold leading-tight text-ios-blue ${density === 'compact' ? 'text-[13px]' : 'px-1 text-[15px]'}`}>{density === 'compact' ? 'Open' : 'Open Shifts'}</div>
+            <div data-name className={`truncate font-semibold leading-tight text-ios-blue ${density === 'compact' ? 'text-[13px]' : 'px-1 text-[15px]'}`}>{density === 'compact' ? 'Open' : 'Open Shifts'}</div>
             {density !== 'compact' && <div className="truncate px-1 text-[12px] leading-tight text-ios-label2">Up for grabs</div>}
           </div>,
           'open',
@@ -612,19 +633,23 @@ function Chip({ s, density, pending, conflict, onClick }: { s: Shift; density: D
     <button type="button" onClick={onClick} aria-label={label} title={label} className="relative w-full min-w-0 rounded-[6px] text-left active:opacity-60" style={style}>
       {density === 'compact' ? (
         <span className="block overflow-hidden whitespace-nowrap py-[3px] pl-[4px] pr-[1px] text-[10.5px] leading-[1.2] tracking-[-0.2px]">
-          <span className="block font-semibold">{fmtClockShort(s.starts_at)}</span>
-          <span className="block text-ios-label2">{fmtClockShort(s.ends_at)}</span>
+          <span data-time className="block font-semibold">
+            {fmtClockShort(s.starts_at)}
+          </span>
+          <span data-time className="block text-ios-label2">
+            {fmtClockShort(s.ends_at)}
+          </span>
         </span>
       ) : density === 'medium' ? (
         <span className="block px-1.5 py-1 pl-2 text-[12px] leading-[1.25]">
-          <span className="block truncate font-semibold">
+          <span data-time className="block truncate font-semibold">
             {fmtClockShort(s.starts_at)}–{fmtClockShort(s.ends_at)}
           </span>
-          <span className="block truncate text-[11px] text-ios-label2">{pos?.name || (draft ? 'Draft' : '')}</span>
+          <span className="block truncate text-[11px] text-ios-label2">{pos ? shortPosition(pos.name) : draft ? 'Draft' : ''}</span>
         </span>
       ) : (
         <span className="block px-2 py-1 pl-2.5 text-[13px] leading-[1.25]">
-          <span className="block truncate font-semibold">
+          <span data-time className="block truncate font-semibold">
             {fmtClock(s.starts_at)} – {fmtClock(s.ends_at)}
           </span>
           <span className="block truncate text-[12px] text-ios-label2">

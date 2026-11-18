@@ -397,7 +397,7 @@ export function PositionsPage() {
             leading={<Dot color={p.color} size={14} />}
             accessory={<Switch checked={p.active} onChange={(v) => toggle(p, v)} label={`${p.name} active`} />}
           >
-            <button type="button" onClick={() => setEdit(p)} className={`min-w-0 flex-1 text-left text-[17px] ${p.active ? '' : 'text-ios-label2'}`}>
+            <button type="button" onClick={() => setEdit(p)} className={`-my-[11px] min-h-11 min-w-0 flex-1 text-left text-[17px] ${p.active ? '' : 'text-ios-label2'}`}>
               {p.name}
             </button>
           </Row>

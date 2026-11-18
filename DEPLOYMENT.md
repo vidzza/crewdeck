@@ -111,3 +111,8 @@ Then delete the tunnel's `scheduler` public hostname. `/opt/crewdeck` holds the 
 ```
 
 3. Run the app locally: `./backend/scripts/dev.sh` in one terminal, `cd web && npm install && npm run dev` in another, then open `http://localhost:5173`.
+4. Check every screen on iPhone Duo sizes (closed and open), a regular iPhone and the narrowest phone, in WebKit, the engine behind Safari on iPhone. No Xcode needed; the first run downloads WebKit (~300 MB). It signs in as the owner, an admin and an employee with demo data, fails on sideways scrolling, cut-off times or names, and sheets that don't fit, and saves screenshots to `tools/duo-check/out/index.html`:
+
+```bash
+./tools/duo-check/run.sh
+```

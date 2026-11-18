@@ -37,7 +37,7 @@ export function Page({
                   history.back()
                 }
               }}
-              className="z-10 flex items-center text-[17px] text-ios-blue active:opacity-40"
+              className="z-10 flex min-h-11 items-center pr-2 text-[17px] text-ios-blue active:opacity-40"
             >
               <Icon name="chevron-left" size={26} stroke={2.4} />
               {back.label}
@@ -474,7 +474,7 @@ export function Sheet({
           {viewOnly ? (
             <span />
           ) : (
-            <button type="button" onClick={onClose} className="justify-self-start text-[17px] text-ios-blue active:opacity-40">
+            <button type="button" onClick={onClose} className="-my-2 min-h-11 justify-self-start pr-3 text-left text-[17px] text-ios-blue active:opacity-40">
               Cancel
             </button>
           )}
@@ -484,7 +484,12 @@ export function Sheet({
               (busy ? (
                 <Spinner small />
               ) : (
-                <button type="button" onClick={onDone} disabled={doneDisabled} className="text-[17px] font-semibold text-ios-blue active:opacity-40 disabled:text-ios-label3">
+                <button
+                  type="button"
+                  onClick={onDone}
+                  disabled={doneDisabled}
+                  className="-my-2 min-h-11 min-w-11 pl-3 text-right text-[17px] font-semibold text-ios-blue active:opacity-40 disabled:text-ios-label3"
+                >
                   {doneLabel}
                 </button>
               ))}
