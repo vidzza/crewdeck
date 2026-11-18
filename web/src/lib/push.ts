@@ -11,8 +11,15 @@ const standalone = () => (navigator as unknown as { standalone?: boolean }).stan
 
 export const pushSupported = () => window.isSecureContext && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
 
+// Versioned per build, so Cloudflare or the browser can never hand out an old copy after an update.
+const SW_URL = `./sw.js?v=${__BUILD__}`
+
+export function registerServiceWorker() {
+  if ('serviceWorker' in navigator && window.isSecureContext) return navigator.serviceWorker.register(SW_URL)
+}
+
 async function registration(): Promise<ServiceWorkerRegistration> {
-  if (!(await navigator.serviceWorker.getRegistration())) await navigator.serviceWorker.register('./sw.js')
+  await registerServiceWorker()
   return navigator.serviceWorker.ready
 }
 

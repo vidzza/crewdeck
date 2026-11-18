@@ -89,7 +89,7 @@ if [ "$CURRENT" != "$PB_VERSION" ]; then
   unzip -q -o "$TMP/pb.zip" pocketbase -d "$TMP"
   install -m 0755 "$TMP/pocketbase" "$APP_DIR/pocketbase"
   rm -rf "$TMP"
-else
+elif [ ! -f "$NEW_BIN" ]; then
   echo "==> PocketBase $PB_VERSION already installed"
 fi
 

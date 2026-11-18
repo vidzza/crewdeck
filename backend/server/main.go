@@ -62,6 +62,19 @@ func main() {
 
 	registerPush(app)
 
+	// Files that must never be stored by Cloudflare or the browser, or phones keep running an old
+	// service worker (the one that shows notifications) for hours after an update.
+	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+		se.Router.BindFunc(func(e *core.RequestEvent) error {
+			switch e.Request.URL.Path {
+			case "/", "/index.html", "/sw.js", "/manifest.webmanifest":
+				e.Response.Header().Set("Cache-Control", "no-cache")
+			}
+			return e.Next()
+		})
+		return se.Next()
+	})
+
 	app.OnServe().Bind(&hook.Handler[*core.ServeEvent]{
 		Func: func(e *core.ServeEvent) error {
 			if !e.Router.HasRoute(http.MethodGet, "/{path...}") {
