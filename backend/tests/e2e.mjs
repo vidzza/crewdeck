@@ -352,6 +352,9 @@ ok(r.data?.ok && r.data.geo === 'inside' && r.data.place === 'Uptown', 'Ursula c
 await req('POST', '/api/ch/clock/out', {}, TU)
 r = await req('POST', '/api/ch/clock/in', { lat: 19.4326, lng: -99.1332, acc: 10 }, TU)
 ok(r.data?.needReason && r.data.geo === 'outside', "Downtown's location doesn't count for Uptown staff", r.data)
+r = await req('POST', '/api/ch/clock/in', { lat: 19.5001, lng: -99.2, acc: 10 }, OT)
+ok(r.data?.ok && r.data.geo === 'inside' && r.data.place === 'Uptown', 'the owner can clock in at a location added later', r.data)
+await req('POST', '/api/ch/clock/out', { lat: 19.5001, lng: -99.2, acc: 10 }, OT)
 
 console.log('\n# Own hours, own time off, open covers and leaving the team')
 // Nobody but the owner changes or approves their own hours.

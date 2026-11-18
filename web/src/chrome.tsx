@@ -55,7 +55,7 @@ export const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent)
 // Step-by-step help to put the app on the Home Screen.
 export function InstallSheet({ onClose }: { onClose: () => void }) {
   return (
-    <Sheet title="Add to Home Screen" onClose={onClose} onDone={onClose}>
+    <Sheet title="Add to Home Screen" onClose={onClose} onDone={onClose} viewOnly>
       <div className="flex flex-col items-center text-center">
         <img src="./icon.svg" alt="" className="h-20 w-20 rounded-[18px] shadow-md" />
         <p className="mt-3 text-[15px] text-ios-label2">Open Crewdeck like any other app, with one tap from your Home Screen.</p>
@@ -165,7 +165,7 @@ export function WelcomeSheet({ onClose }: { onClose: () => void }) {
     })
   const count = ['', 'One quick thing:', 'Two quick things:', 'Three quick things:'][steps.length]
   return (
-    <Sheet title="Welcome" onClose={onClose} onDone={onClose} doneLabel="Done">
+    <Sheet title="Welcome" onClose={onClose} onDone={onClose} doneLabel="Done" viewOnly>
       <div className="flex flex-col items-center text-center">
         <img src="./icon.svg" alt="" className="h-20 w-20 rounded-[18px] shadow-md" />
         <h3 className="mt-3 text-[24px] font-bold">You're in, {(me.name || '').split(' ')[0] || 'welcome'}!</h3>
@@ -538,7 +538,7 @@ function LocationHelpSheet({ timeout, onFinish }: { timeout: number; onFinish: (
       await navigator.clipboard.writeText(window.location.href)
       toast('Link copied')
     } catch {
-      askText({ title: 'Copy This Link', message: 'Select the link below and copy it.', value: window.location.href, confirm: 'Done', cancel: 'Close' })
+      askText({ title: 'Copy This Link', message: 'Select the link below and copy it.', value: window.location.href, confirm: 'Done', cancel: '' })
     }
   }
 

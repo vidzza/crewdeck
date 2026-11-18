@@ -292,6 +292,10 @@ const GEO_TXT = {
 }
 
 // ---------- time clock ----------
+// Where someone can clock in: owners and admins anywhere (also locations added later), others at their locations.
+function clockLocs(u) {
+  return isAdmin(u) ? [] : userLocs(u)
+}
 function openCard(app, userId) {
   return findFirst(app, "timecards", "user = {:u} && clock_out = ''", { u: userId })
 }
@@ -313,7 +317,7 @@ function clockIn(app, u, b) {
   if (openCard(app, u.id)) throw new BadRequestError("You're already clocked in. Clock out first.")
   const now = new Date()
   const shift = currentShift(app, u.id, now)
-  const g = checkGeo(app, b, shift ? shift.getString("location") : "", shift ? shift.getString("section") : "", userLocs(u))
+  const g = checkGeo(app, b, shift ? shift.getString("location") : "", shift ? shift.getString("section") : "", clockLocs(u))
   const reason = String(b.reason || "").trim()
   const needs = geoNeedsReason(g.geo)
   if (needs && !reason) {
@@ -367,7 +371,7 @@ function clockOut(app, u, b) {
   if (!tc) throw new BadRequestError("You're not clocked in.")
   const now = new Date()
   closeBreak(tc, now)
-  const g = checkGeo(app, b, tc.getString("location"), tc.getString("section"), userLocs(u))
+  const g = checkGeo(app, b, tc.getString("location"), tc.getString("section"), clockLocs(u))
   tc.set("clock_out", now.toISOString())
   if (b.lat !== undefined && b.lat !== null) {
     tc.set("out_lat", Number(b.lat) || 0)

@@ -98,11 +98,11 @@ function ShiftChanges() {
   // Only the owner approves shift changes. Admins and managers can see what's waiting.
   const toApprove = isOwner(me) ? list.filter((r) => r.status === 'pending_admin') : []
   const waitingOwner = !isOwner(me) && isMgr(me) ? list.filter((r) => r.status === 'pending_admin' && r.requester !== me.id) : []
-  // Open covers: for people who work at that location (owners and admins work everywhere).
+  // Open covers: for staff who work at that location. Owners and admins see them under "Waiting on Coworkers".
   const worksThere = (r: ShiftRequest) => {
     const loc = r.expand?.shift?.location
     const meNow = users.find((u) => u.id === me.id) || me
-    return isAdmin(meNow) || !loc || !meNow.locations?.length || meNow.locations.includes(loc)
+    return !isAdmin(meNow) && (!loc || !meNow.locations?.length || meNow.locations.includes(loc))
   }
   const forMe = list.filter(
     (r) => r.status === 'pending_peer' && r.requester !== me.id && (r.target_user === me.id || (r.type === 'cover' && !r.target_user && worksThere(r))),

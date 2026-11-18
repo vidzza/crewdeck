@@ -179,7 +179,7 @@ function PersonSheet({
       }
       let saved: User
       if (user && selfOnly) {
-        await pb.collection('users').update<User>(user.id, { name: body.name, email: body.email, phone: body.phone })
+        await pb.collection('users').update<User>(user.id, { name: body.name, phone: body.phone })
         toast('Saved')
         return onSaved()
       }
@@ -215,13 +215,21 @@ function PersonSheet({
       )}
       {selfOnly && (
         <Banner tone="blue" icon="info">
-          You can change your name, phone and email. The owner changes your access level, positions and pay.
+          You can change your name and phone. The owner changes your email, access level, positions and pay.
         </Banner>
       )}
       <Group footer={user ? undefined : "No password needed. After you add them, you'll get a link to send them so they can join."}>
         <InputRow label="Name" placeholder="Full name" autoFocus={!user} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
         <InputRow label="Phone" type="tel" placeholder="Mobile number" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} />
-        <InputRow label="Email" type="email" autoCapitalize="none" placeholder="Optional" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
+        <InputRow
+          label="Email"
+          type="email"
+          autoCapitalize="none"
+          placeholder="Optional"
+          readOnly={selfOnly}
+          value={f.email}
+          onChange={(e) => setF({ ...f, email: e.target.value })}
+        />
       </Group>
       {locked || selfOnly ? (
         <Group header="Permissions" footer={ACCESS_HELP[f.access]}>
@@ -320,13 +328,13 @@ function InviteSheet({ user, onClose }: { user: User; onClose: () => void }) {
       await navigator.clipboard.writeText(message)
       toast('Copied. Paste it in a message to them.')
     } catch {
-      askText({ title: 'Copy This Message', message: 'Select the text below and copy it.', value: message, confirm: 'Done', cancel: 'Close' })
+      askText({ title: 'Copy This Message', message: 'Select the text below and copy it.', value: message, confirm: 'Done', cancel: '' })
     }
   }
   const phoneDigits = user.phone.replace(/[^\d+]/g, '')
 
   return (
-    <Sheet title={joined ? 'Sign-In Link' : 'Invite'} onClose={onClose} onDone={onClose} doneLabel="Done">
+    <Sheet title={joined ? 'Sign-In Link' : 'Invite'} onClose={onClose} onDone={onClose} doneLabel="Done" viewOnly>
       <div className="flex flex-col items-center text-center">
         <Avatar name={user.name || user.email} size={64} />
         <h3 className="mt-3 text-[22px] font-bold">{joined ? `New sign-in link for ${first}` : `Invite ${first}`}</h3>

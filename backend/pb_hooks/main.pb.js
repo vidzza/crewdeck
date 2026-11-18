@@ -243,8 +243,9 @@ routerAdd(
     if (type === "cover" && targetUser) {
       L.notify($app, [targetUser], me + " asked you to cover a shift", when, "#/requests")
     } else if (type === "cover") {
+      // Staff who work at that location (owners and admins hear about it once someone takes it).
       const others = $app
-        .findRecordsByFilter("users", "active = true && id != {:me}", "", 0, 0, { me: u.id })
+        .findRecordsByFilter("users", "active = true && id != {:me} && (access = 'employee' || access = 'manager')", "", 0, 0, { me: u.id })
         .filter((x) => worksHere(x))
         .map((x) => x.id)
       L.notify($app, others, "Shift up for grabs", me + " needs someone to cover: " + when, "#/requests")

@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { pb, errMsg, type User } from '../lib/pb'
-import { Button, Group, InputRow, Spinner, toast } from '../ui'
+import { Banner, Button, Group, InputRow, Spinner, toast } from '../ui'
 import { Icon } from '../icons'
 
 interface Invite {
@@ -80,6 +80,9 @@ export default function Join({ token }: { token: string }) {
 
   const first = (inv.name || '').split(' ')[0]
   const reset = !!inv.joined
+  // Someone else is signed in on this phone (e.g. the owner testing the link): say so before switching.
+  const current = pb.authStore.isValid ? (pb.authStore.record as { name?: string } | null) : null
+  const otherAccount = current?.name && current.name !== inv.name ? current.name : ''
   return (
     <div className="mx-auto flex min-h-screen max-w-sm flex-col items-center px-5 pb-12" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 48px)' }}>
       <img src="./icon.svg" alt="" className="h-20 w-20 rounded-[18px] shadow-[0_8px_24px_rgba(0,98,224,0.25)]" />
@@ -90,6 +93,11 @@ export default function Join({ token }: { token: string }) {
           : `Hi ${first}! ${inv.invitedBy ? `${inv.invitedBy} invited you` : 'You were invited'} to see your schedule, clock in and swap shifts here.`}
       </p>
       <form onSubmit={submit} className="mt-8 w-full space-y-6">
+        {otherAccount && (
+          <Banner tone="orange" icon="info">
+            This phone is signed in as <b>{otherAccount}</b>. {reset ? 'Saving' : 'Joining'} signs {otherAccount.split(' ')[0]} out here. This link is for {first}'s phone.
+          </Banner>
+        )}
         {!reset && (
           <Group header="Your Name">
             <InputRow placeholder="Full name" autoComplete="name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required />

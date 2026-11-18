@@ -98,7 +98,7 @@ function LoginForm({ company }: { company: string }) {
 // ---------- first-time setup: company → first location → owner ----------
 function SetupWizard({ needsCode }: { needsCode: boolean }) {
   const [step, setStep] = useState(0)
-  const [f, setF] = useState({ company: '', locName: '', address: '', lat: 0, lng: 0, acc: 0, name: '', email: '', password: '', code: '' })
+  const [f, setF] = useState({ company: '', locName: '', address: '', lat: 0, lng: 0, acc: 0, name: '', email: '', phone: '', password: '', code: '' })
   const [busy, setBusy] = useState(false)
   const [gps, setGps] = useState<'idle' | 'asking' | 'ok' | 'no'>('idle')
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value })
@@ -127,6 +127,7 @@ function SetupWizard({ needsCode }: { needsCode: boolean }) {
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         name: f.name.trim(),
         email: f.email.trim().toLowerCase(),
+        phone: f.phone.trim(),
         password: f.password,
         code: f.code,
       })
@@ -243,9 +244,10 @@ function SetupWizard({ needsCode }: { needsCode: boolean }) {
       {step === 3 && (
         <form className="mt-8 space-y-6" onSubmit={finish}>
           <StepTitle icon="person" title="Create your account" text={`You'll be the owner of ${f.company.trim() || 'your company'}.`} />
-          <Group>
+          <Group footer="You'll sign in with your email or phone number and this password.">
             <InputRow placeholder="Your name" autoComplete="name" value={f.name} onChange={set('name')} required />
             <InputRow type="email" placeholder="Email" autoComplete="email" autoCapitalize="none" value={f.email} onChange={set('email')} required />
+            <InputRow type="tel" placeholder="Mobile number (optional)" autoComplete="tel" value={f.phone} onChange={set('phone')} />
             <InputRow type="password" placeholder="Password (8+ characters)" autoComplete="new-password" minLength={8} value={f.password} onChange={set('password')} required />
           </Group>
           {needsCode && (

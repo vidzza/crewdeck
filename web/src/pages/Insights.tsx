@@ -436,12 +436,12 @@ function CreateKeySheet({ onClose }: { onClose: () => void }) {
       await navigator.clipboard.writeText(key)
       toast('Key copied')
     } catch {
-      askText({ title: 'Copy This Key', message: 'Select the key below and copy it.', value: key, confirm: 'Done', cancel: 'Close' })
+      askText({ title: 'Copy This Key', message: 'Select the key below and copy it.', value: key, confirm: 'Done', cancel: '' })
     }
   }
   if (key)
     return (
-      <Sheet title="New API Key" onClose={onClose} onDone={onClose} doneLabel="Done">
+      <Sheet title="New API Key" onClose={onClose} onDone={onClose} doneLabel="Done" viewOnly>
         <div className="flex flex-col items-center text-center">
           <span className="flex h-16 w-16 items-center justify-center rounded-full bg-ios-green/15 text-ios-green">
             <Icon name="key" size={30} />

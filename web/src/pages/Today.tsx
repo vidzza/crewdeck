@@ -281,8 +281,9 @@ function ManagerPanel({ userName }: { userName: (id: string) => string }) {
       const [o, rq, to, fl] = await Promise.all([
         pb.collection('timecards').getFullList<Timecard>({ filter: 'clock_out = ""', sort: 'clock_in' }),
         pb.collection('shift_requests').getList(1, 1, { filter: 'status = "pending_admin"' }),
-        pb.collection('time_off').getList(1, 1, { filter: 'status = "pending"' }),
-        pb.collection('timecards').getList(1, 1, { filter: 'flagged = true && approved = false' }),
+        // What this person can act on: not their own (the owner approves those), except for the owner.
+        pb.collection('time_off').getList(1, 1, { filter: isOwner(me) ? 'status = "pending"' : pb.filter('status = "pending" && user != {:me}', { me: me.id }) }),
+        pb.collection('timecards').getList(1, 1, { filter: isOwner(me) ? 'flagged = true && approved = false' : pb.filter('flagged = true && approved = false && user != {:me}', { me: me.id }) }),
       ])
       setOpen(o.filter((c) => !multi || !currentLocation || c.location === currentLocation.id))
       setCounts({ requests: rq.totalItems, timeoff: to.totalItems, flagged: fl.totalItems })
@@ -290,7 +291,7 @@ function ManagerPanel({ userName }: { userName: (id: string) => string }) {
     load().catch(() => {})
     const t = setInterval(() => load().catch(() => {}), 60000)
     return () => clearInterval(t)
-  }, [multi, currentLocation])
+  }, [multi, currentLocation, me])
 
   const badge = (n: number) => (n ? <span className="rounded-full bg-ios-red px-2 py-[1px] text-[15px] font-semibold text-white">{n}</span> : <span className="text-ios-label2">0</span>)
 

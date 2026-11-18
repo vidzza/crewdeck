@@ -553,7 +553,7 @@ function openAlert(a: Omit<AlertReq, 'resolve'>) {
 export async function ask(o: { title: string; message?: string; confirm?: string; cancel?: string; destructive?: boolean }) {
   return (await openAlert({ confirm: 'OK', cancel: 'Cancel', ...o })) !== null
 }
-/** Asks for a short text. Resolves the text, or null when cancelled. */
+/** Asks for a short text. Resolves the text, or null when cancelled. cancel: '' shows only one button. */
 export function askText(o: { title: string; message?: string; placeholder?: string; value?: string; confirm?: string; cancel?: string }) {
   return openAlert({ confirm: 'OK', cancel: 'Cancel', ...o, input: { placeholder: o.placeholder, value: o.value } })
 }
@@ -611,14 +611,16 @@ export function Alerts() {
             />
           )}
         </div>
-        <div className="grid grid-cols-2 border-t border-black/15">
-          <button
-            type="button"
-            onClick={() => close(null)}
-            className={`min-h-11 border-r border-black/15 px-2 text-[17px] text-ios-blue active:bg-black/5 ${a.destructive ? 'font-semibold' : ''}`}
-          >
-            {a.cancel}
-          </button>
+        <div className={`grid border-t border-black/15 ${a.cancel ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          {a.cancel && (
+            <button
+              type="button"
+              onClick={() => close(null)}
+              className={`min-h-11 border-r border-black/15 px-2 text-[17px] text-ios-blue active:bg-black/5 ${a.destructive ? 'font-semibold' : ''}`}
+            >
+              {a.cancel}
+            </button>
+          )}
           <button
             type="submit"
             autoFocus={!a.input}

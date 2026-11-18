@@ -3,23 +3,7 @@ import { pb, errMsg, API_URL, ACCESS_LABEL, type Loc, type Position, type Sectio
 import { getPosition } from '../lib/geo'
 import { useData } from '../store'
 import { InstallSheet, TopActions } from '../chrome'
-import { ask, Avatar, Button, ColorRow, Dot, Group, HeaderButton, InputRow, Page, Pill, Row, SelectRow, Sheet, Switch, toast, type Option } from '../ui'
-
-const TIME_ZONES: Option[] = [
-  { value: 'America/New_York', label: 'Eastern' },
-  { value: 'America/Chicago', label: 'Central' },
-  { value: 'America/Denver', label: 'Mountain' },
-  { value: 'America/Phoenix', label: 'Arizona' },
-  { value: 'America/Los_Angeles', label: 'Pacific' },
-  { value: 'America/Anchorage', label: 'Alaska' },
-  { value: 'Pacific/Honolulu', label: 'Hawaii' },
-  { value: 'America/Mexico_City', label: 'Mexico City' },
-]
-// The common US zones, plus whatever the location already uses (set from the owner's phone at setup).
-function timeZoneOptions(current: string): Option[] {
-  if (!current || TIME_ZONES.some((z) => z.value === current)) return TIME_ZONES
-  return [{ value: current, label: current.split('/').pop()!.replace(/_/g, ' ') }, ...TIME_ZONES]
-}
+import { ask, Avatar, Button, ColorRow, Dot, Group, HeaderButton, InputRow, Page, Pill, Row, Sheet, Switch, toast } from '../ui'
 
 const mapsLink = (lat: number, lng: number) => `https://maps.apple.com/?ll=${lat},${lng}&q=Time%20clock`
 const hasSpot = (l: { lat: number; lng: number }) => !!(l.lat || l.lng)
@@ -200,7 +184,6 @@ export function LocationPage({ id }: { id: string }) {
     lat: loc?.lat ? String(loc.lat) : '',
     lng: loc?.lng ? String(loc.lng) : '',
     radius_m: loc?.radius_m || 100,
-    timezone: loc?.timezone || '',
     ot_weekly_hours: String(loc?.ot_weekly_hours || 40),
   }))
   const [busy, setBusy] = useState(false)
@@ -216,11 +199,17 @@ export function LocationPage({ id }: { id: string }) {
   const spot = !!(Number(f.lat) || Number(f.lng))
   const mySections = sections.filter((s) => s.location === loc.id)
 
+  // Saved right away: nobody should lose the spot by forgetting to tap Save.
   const useHere = async () => {
     const p = await readGps()
-    if (p) {
+    if (!p) return
+    try {
+      await pb.collection('locations').update(loc.id, { lat: p.lat, lng: p.lng })
       setF((x) => ({ ...x, lat: p.lat.toFixed(6), lng: p.lng.toFixed(6) }))
-      toast(`Got it (±${p.acc} m). Tap Save.`)
+      await reload()
+      toast(`Time clock spot saved (±${p.acc} m)`)
+    } catch (e) {
+      toast(errMsg(e), 'error')
     }
   }
   const save = async () => {
@@ -233,7 +222,6 @@ export function LocationPage({ id }: { id: string }) {
         lat: Number(f.lat) || 0,
         lng: Number(f.lng) || 0,
         radius_m: Number(f.radius_m) || 100,
-        timezone: f.timezone,
         ot_weekly_hours: Number(f.ot_weekly_hours) || 40,
       })
       await reload()
@@ -252,9 +240,9 @@ export function LocationPage({ id }: { id: string }) {
         <InputRow label="Address" placeholder="Optional" value={f.address} onChange={(e) => setF({ ...f, address: e.target.value })} />
       </Group>
 
-      <Group header="Time Clock Spot" footer="Stand where people work and tap Use My Current Location, then Save. People can only clock in inside the circle — or they explain why and you review it.">
+      <Group header="Time Clock Spot" footer="Stand where people work and tap Use My Current Location. It's saved right away. People can only clock in inside the circle — or they explain why and you review it.">
         <Row icon="pin" iconBg={spot ? '#34c759' : '#ff3b30'} title="Status" value={spot ? <Pill tone="green">Set Up</Pill> : <Pill tone="red">Not Set Up</Pill>} />
-        <Row icon="location" iconBg="#007aff" title="Use My Current Location" tone="link" onClick={useHere} />
+        <Row icon="location" iconBg="#007aff" title={spot ? 'Move It Here' : 'Use My Current Location'} tone="link" onClick={useHere} />
         {spot && <Row title="View on Map" tone="link" href={mapsLink(Number(f.lat), Number(f.lng))} chevron />}
       </Group>
 
@@ -284,7 +272,6 @@ export function LocationPage({ id }: { id: string }) {
 
       <Group header="Pay Rules" footer="Hours above this count as overtime in Schedule and Hours.">
         <InputRow label="Overtime After" type="number" inputMode="numeric" suffix="h/week" value={f.ot_weekly_hours} onChange={(e) => setF({ ...f, ot_weekly_hours: e.target.value })} />
-        <SelectRow label="Time Zone" value={f.timezone} onChange={(v) => setF({ ...f, timezone: v })} options={timeZoneOptions(f.timezone)} />
       </Group>
 
       <Button size="lg" full busy={busy} onClick={save}>
