@@ -3,7 +3,23 @@ import { pb, errMsg, API_URL, ACCESS_LABEL, type Loc, type Position, type Sectio
 import { getPosition } from '../lib/geo'
 import { useData } from '../store'
 import { InstallSheet, TopActions } from '../chrome'
-import { Avatar, Button, ColorRow, Dot, Group, HeaderButton, InputRow, Page, Pill, Row, Sheet, Switch, toast } from '../ui'
+import { Avatar, Button, ColorRow, Dot, Group, HeaderButton, InputRow, Page, Pill, Row, SelectRow, Sheet, Switch, toast, type Option } from '../ui'
+
+const TIME_ZONES: Option[] = [
+  { value: 'America/New_York', label: 'Eastern' },
+  { value: 'America/Chicago', label: 'Central' },
+  { value: 'America/Denver', label: 'Mountain' },
+  { value: 'America/Phoenix', label: 'Arizona' },
+  { value: 'America/Los_Angeles', label: 'Pacific' },
+  { value: 'America/Anchorage', label: 'Alaska' },
+  { value: 'Pacific/Honolulu', label: 'Hawaii' },
+  { value: 'America/Mexico_City', label: 'Mexico City' },
+]
+// The common US zones, plus whatever the location already uses (set from the owner's phone at setup).
+function timeZoneOptions(current: string): Option[] {
+  if (!current || TIME_ZONES.some((z) => z.value === current)) return TIME_ZONES
+  return [{ value: current, label: current.split('/').pop()!.replace(/_/g, ' ') }, ...TIME_ZONES]
+}
 
 const mapsLink = (lat: number, lng: number) => `https://maps.apple.com/?ll=${lat},${lng}&q=Time%20clock`
 const hasSpot = (l: { lat: number; lng: number }) => !!(l.lat || l.lng)
@@ -263,12 +279,7 @@ export function LocationPage({ id }: { id: string }) {
 
       <Group header="Pay Rules" footer="Hours above this count as overtime in Schedule and Hours.">
         <InputRow label="Overtime After" type="number" inputMode="numeric" suffix="h/week" value={f.ot_weekly_hours} onChange={(e) => setF({ ...f, ot_weekly_hours: e.target.value })} />
-        <InputRow label="Time Zone" value={f.timezone} onChange={(e) => setF({ ...f, timezone: e.target.value })} />
-      </Group>
-
-      <Group header="Advanced" footer="Only change these if you know the exact coordinates.">
-        <InputRow label="Latitude" inputMode="decimal" placeholder="—" value={f.lat} onChange={(e) => setF({ ...f, lat: e.target.value })} />
-        <InputRow label="Longitude" inputMode="decimal" placeholder="—" value={f.lng} onChange={(e) => setF({ ...f, lng: e.target.value })} />
+        <SelectRow label="Time Zone" value={f.timezone} onChange={(v) => setF({ ...f, timezone: v })} options={timeZoneOptions(f.timezone)} />
       </Group>
 
       <Button size="lg" full busy={busy} onClick={save}>
