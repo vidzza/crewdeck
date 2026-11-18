@@ -17,14 +17,37 @@ cmd="${1:-}"
 
 if [ "$cmd" = "setup" ]; then
   mkdir -p "$(dirname "$KEY_FILE")"
-  printf "Paste the API key from Crewdeck → Settings → API Access (it won't show): "
-  IFS= read -rs key
-  echo
-  key="$(printf '%s' "$key" | tr -d '[:space:]')"
-  case "$key" in cdk_*) ;; *) echo "That doesn't look like a Crewdeck key (they start with cdk_). Nothing was saved." >&2; exit 1 ;; esac
-  code="$(curl -s -o /dev/null -w '%{http_code}' -H "X-API-Key: $key" "$URL/api/ch/v1")"
-  [ "$code" = 200 ] || { echo "The server didn't accept that key (answer $code). Nothing was saved." >&2; exit 1; }
+  find_key() { grep -oE 'cdk_[A-Za-z0-9]{40}' | head -1 || true; }
+  key=""
+  from_clipboard=""
+  # Copied with "Copy Key"? Use it straight from the clipboard (on a Mac).
+  if command -v pbpaste >/dev/null; then
+    key="$(pbpaste 2>/dev/null | find_key)"
+    if [ -n "$key" ]; then
+      printf "Found a Crewdeck key on your clipboard (%s…). Use it? [Y/n] " "${key:0:10}"
+      IFS= read -r ans
+      case "$ans" in n | N | no | No) key="" ;; *) from_clipboard=1 ;; esac
+    fi
+  fi
+  if [ -z "$key" ]; then
+    printf "Paste the API key from Crewdeck → Settings → API Access, then press Enter (it won't show): "
+    IFS= read -rs raw
+    echo
+    key="$(printf '%s' "$raw" | find_key)"
+    if [ -z "$raw" ]; then
+      echo "Nothing was pasted. Tap Copy Key in Crewdeck first (on the Mac, or on your iPhone with Handoff on), then run this again." >&2
+      exit 1
+    elif [ -z "$key" ]; then
+      echo "What was pasted (${#raw} characters) isn't a Crewdeck key: it starts with cdk_ and is 44 characters long. Nothing was saved." >&2
+      exit 1
+    fi
+  fi
+  code="$(curl -s -m 20 -o /dev/null -w '%{http_code}' -H "X-API-Key: $key" "$URL/api/ch/v1" || true)"
+  [ "$code" = 000 ] && { echo "Couldn't reach $URL. Check the internet connection and run this again. Nothing was saved." >&2; exit 1; }
+  [ "$code" = 200 ] || { echo "The server didn't accept that key (answer $code): it may have been revoked. Nothing was saved." >&2; exit 1; }
   (umask 077 && printf '%s' "$key" > "$KEY_FILE")
+  # Don't leave a working key sitting on the clipboard.
+  [ -n "$from_clipboard" ] && printf '' | pbcopy
   echo "Saved. The key works and is stored in $KEY_FILE (only you can read it)."
   exit 0
 fi
