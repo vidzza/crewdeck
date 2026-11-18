@@ -12,7 +12,7 @@ async function readGps(): Promise<{ lat: number; lng: number; acc: number } | nu
   toast('Finding your location… hold still', 'info')
   const g = await getPosition(20000)
   if (!g.pos) {
-    toast(g.error || "Couldn't get your location", 'error')
+    if (g.error) toast(g.error, 'error')
     return null
   }
   if (g.pos.acc > 60) toast(`Location is rough (±${g.pos.acc} m). Try again near a door or window.`, 'info')

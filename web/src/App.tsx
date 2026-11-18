@@ -10,7 +10,7 @@ import Requests from './pages/Requests'
 import Hours from './pages/Hours'
 import Settings, { LocationPage, LocationsPage, PositionsPage } from './pages/Settings'
 import Join, { WELCOME_KEY } from './pages/Join'
-import { WelcomeSheet } from './chrome'
+import { LocationHelp, WelcomeSheet } from './chrome'
 import Team from './pages/Team'
 import Account from './pages/Account'
 import Notices from './pages/Notices'
@@ -83,6 +83,7 @@ export default function App() {
     return (
       <>
         <Join token={path.slice('/join/'.length)} />
+        <LocationHelp />
         <Toaster />
       </>
     )
@@ -98,6 +99,7 @@ export default function App() {
       ) : (
         <Login />
       )}
+      <LocationHelp />
       <Toaster />
     </>
   )
