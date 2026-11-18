@@ -15,6 +15,7 @@ import { syncBadge, syncPush } from './lib/push'
 import Team from './pages/Team'
 import Account from './pages/Account'
 import Notices from './pages/Notices'
+import Insights, { ApiAccessPage } from './pages/Insights'
 
 // Hash routes. Settings pages are owner/admin only.
 const PAGES: Record<string, { page: ComponentType; admin?: boolean }> = {
@@ -29,6 +30,8 @@ const PAGES: Record<string, { page: ComponentType; admin?: boolean }> = {
   '/settings/team': { page: Team, admin: true },
   '/settings/locations': { page: LocationsPage, admin: true },
   '/settings/positions': { page: PositionsPage, admin: true },
+  '/settings/api': { page: ApiAccessPage, admin: true },
+  '/insights': { page: Insights, admin: true },
 }
 
 interface Tab {

@@ -460,5 +460,103 @@ console.log('\n# Push notifications')
   fake.close()
 }
 
+console.log('\n# Insights (analytics)')
+{
+  // A controlled past week at a test location: Mon shift (10 min late), Tue shift (no-show),
+  // Wed open shift, Thu extra clock-in. $20/h, overtime after 6 h/week at this location.
+  const DAYMS = 24 * H
+  const base = new Date(Date.now() - 70 * DAYMS)
+  const mon = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate()))
+  mon.setUTCDate(mon.getUTCDate() - ((mon.getUTCDay() + 6) % 7))
+  const at = (dayOffset, hh, mm = 0) => new Date(mon.getTime() + dayOffset * DAYMS + (hh * 60 + mm) * 60000).toISOString()
+  const ymd = (d) => d.toISOString().slice(0, 10)
+  const FROM = ymd(mon)
+  const TO = ymd(new Date(mon.getTime() + 7 * DAYMS))
+
+  r = await req('POST', '/api/collections/locations/records', { name: 'Lab', active: true, radius_m: 100, ot_weekly_hours: 6 }, OT)
+  ok(r.status === 200, 'owner adds a test location', r.data)
+  const lab = r.data
+  const rate = (await req('GET', `/api/collections/pay_rates/records?filter=${encodeURIComponent(`user = '${e1.id}'`)}`, null, OT)).data.items[0]
+  ok((await req('PATCH', `/api/collections/pay_rates/records/${rate.id}`, { hourly: 20 }, OT)).status === 200, 'Beto earns $20/h')
+  const shift = async (body) => (await req('POST', '/api/collections/shifts/records', { location: lab.id, position: positions[2].id, published: true, ...body }, OT)).data
+  const sA = await shift({ user: e1.id, starts_at: at(0, 17), ends_at: at(0, 21) })
+  const sB = await shift({ user: e1.id, starts_at: at(1, 17), ends_at: at(1, 21) })
+  const sC = await shift({ user: '', starts_at: at(2, 17), ends_at: at(2, 21) })
+  ok(sA?.id && sB?.id && sC?.id, 'three shifts that week (one open)')
+  if (su?.token) {
+    const c1 = await req('POST', '/api/collections/timecards/records', { user: e1.id, location: lab.id, shift: sA.id, clock_in: at(0, 17, 10), clock_out: at(0, 21), break_min: 0 }, su.token)
+    const c2 = await req('POST', '/api/collections/timecards/records', { user: e1.id, location: lab.id, clock_in: at(3, 16), clock_out: at(3, 20), break_min: 0 }, su.token)
+    ok(c1.status === 200 && c2.status === 200, 'two clock-ins that week', [c1.data, c2.data])
+  }
+  const Q = `?from=${FROM}&to=${TO}&location=${lab.id}`
+
+  ok((await req('GET', `/api/ch/insights${Q}`, null, T1)).status === 403, "employees can't see insights")
+  ok((await req('GET', `/api/ch/insights${Q}`, null, AT)).status === 403, "managers can't see insights")
+  ok((await req('GET', `/api/ch/insights${Q}`)).status === 401, 'insights need sign-in')
+  r = await req('GET', `/api/ch/insights${Q}`, null, GT)
+  ok(r.status === 200, 'an admin sees insights', r.data)
+  const T = r.data?.totals || {}
+  const near = (a, b) => Math.abs(a - b) < 0.02
+  ok(T.scheduledHours === 8 && T.shifts === 2 && T.openShifts === 1, '8 h scheduled in 2 shifts, plus 1 open shift', T)
+  ok(near(T.workedHours, 7.83), '7.83 h worked', T)
+  ok(T.late === 1 && r.data.late[0]?.minutes_late === 10, 'one clock-in 10 minutes late', r.data.late)
+  ok(T.noShows === 1 && r.data.noShows[0]?.shift === sB.id, 'the Tuesday shift is a no-show', r.data.noShows)
+  ok(near(T.overtimeHours, 1.83), '1.83 h of overtime past the 6 h limit', T)
+  ok(T.laborCost === 175 && T.scheduledCost === 160, 'labor cost $175 (overtime at 1.5×), scheduled $160', T)
+  ok(r.data.byDay.length === 7 && r.data.byDay[0].scheduledHours === 4 && near(r.data.byDay[0].workedHours, 3.83), 'by day: Monday 4 h scheduled, 3.83 h worked', r.data.byDay[0])
+  ok(r.data.byPerson[0]?.name === 'Beto Bartender' && r.data.byPerson[0].noShows === 1 && r.data.hasPayRates, 'by person', r.data.byPerson[0])
+  ok(r.data.byPosition.some((p) => p.name === positions[2].name && p.scheduledHours === 8), 'by position', r.data.byPosition)
+  ok((await req('GET', '/api/ch/insights?from=2020-01-01&to=2026-01-01', null, OT)).status === 400, 'ranges longer than a year are refused')
+  ok((await req('GET', '/api/ch/insights?days=30', null, OT)).data?.byDay?.length === 30, '?days=30 gives the last 30 days')
+  r = await req('GET', '/api/ch/insights', null, OT)
+  ok(r.status === 200 && r.data.byDay.length === 7, 'default is this week')
+
+  console.log('\n# Read-only API')
+  ok((await req('POST', '/api/ch/api-keys', { name: 'Nope' }, T1)).status === 403, "employees can't create API keys")
+  ok((await req('POST', '/api/ch/api-keys', { name: 'Nope' }, AT)).status === 403, "managers can't create API keys")
+  ok((await req('POST', '/api/ch/api-keys', { name: ' ' }, OT)).status === 400, 'a key needs a name')
+  r = await req('POST', '/api/ch/api-keys', { name: 'Claude' }, OT)
+  ok(r.status === 200 && /^cdk_[A-Za-z0-9]{40}$/.test(r.data?.key || ''), 'owner creates a key (shown once)', r.data)
+  const KEY = r.data.key
+  const keyId = r.data.id
+  const list = (await req('GET', '/api/ch/api-keys', null, OT)).data.items
+  ok(list.some((k) => k.id === keyId && k.name === 'Claude' && k.prefix === KEY.slice(0, 10)) && list.every((k) => !('key' in k) && !('hash' in k)), 'the list never shows the key again', list)
+  ok((await req('GET', '/api/collections/api_keys/records', null, OT)).status >= 400, "keys can't be read through the regular API")
+
+  const kreq = async (path, key, header = 'X-API-Key', method = 'GET', body) => {
+    const res = await fetch(API + path, { method, headers: { 'content-type': 'application/json', [header]: header === 'Authorization' ? `Bearer ${key}` : key }, body: body ? JSON.stringify(body) : undefined })
+    let data = null
+    try {
+      data = await res.json()
+    } catch {}
+    return { status: res.status, data }
+  }
+  ok((await req('GET', '/api/ch/v1')).status === 401, 'no key → 401')
+  ok((await kreq('/api/ch/v1', 'cdk_' + 'x'.repeat(40))).status === 401, 'wrong key → 401')
+  r = await kreq('/api/ch/v1', KEY)
+  ok(r.status === 200 && r.data?.endpoints?.['GET /api/ch/v1/summary'], 'key in X-API-Key works and lists the endpoints', r.data)
+  ok((await kreq('/api/ch/v1', KEY, 'Authorization')).status === 200, 'key as "Authorization: Bearer" works too')
+  r = await kreq(`/api/ch/v1/summary${Q}`, KEY)
+  ok(r.status === 200 && r.data.totals.laborCost === 175 && r.data.totals.noShows === 1, 'summary matches the Insights screen', r.data?.totals)
+  r = await kreq('/api/ch/v1/people', KEY)
+  const beto = r.data?.items?.find((p) => p.id === e1.id)
+  ok(beto && beto.hourly === 20 && beto.positions.length > 0 && !('password' in beto) && !('tokenKey' in beto), 'people, with pay and no secrets', beto)
+  r = await kreq(`/api/ch/v1/shifts?from=${FROM}&to=${TO}&location=${lab.id}`, KEY)
+  ok(r.data?.items?.length === 3 && r.data.items.some((s) => s.open_shift) && r.data.items[0].name === 'Beto Bartender', 'shifts, open shift included', r.data)
+  r = await kreq(`/api/ch/v1/timecards?from=${FROM}&to=${TO}&location=${lab.id}`, KEY)
+  ok(r.data?.items?.length === 2 && near(r.data.items[0].hours, 3.83), 'timecards with hours', r.data)
+  ok((await kreq('/api/ch/v1/locations', KEY)).data?.locations?.some((l) => l.name === 'Lab'), 'locations')
+  ok((await kreq('/api/ch/v1/requests?days=30', KEY)).status === 200 && (await kreq('/api/ch/v1/time-off?days=30', KEY)).status === 200, 'requests and time off')
+  r = await kreq('/api/ch/v1/audit?limit=20', KEY)
+  ok(r.data?.items?.some((a) => a.action === 'api_key.create'), 'audit log shows who created the key', r.data?.items?.slice(0, 3))
+  ok((await kreq('/api/ch/v1/summary', KEY, 'X-API-Key', 'POST', {})).status >= 400, 'the API is read-only')
+  ok((await kreq('/api/collections/shifts/records', KEY, 'X-API-Key', 'POST', { location: lab.id, starts_at: at(4, 17), ends_at: at(4, 21) })).status >= 400, "a key can't create records")
+  r = await kreq('/api/collections/pay_rates/records', KEY)
+  ok(r.status >= 400 || r.data?.items?.length === 0, "a key doesn't unlock the regular API (no pay rates)", r.data)
+  ok((await req('DELETE', `/api/ch/api-keys/${keyId}`, null, T1)).status === 403, "employees can't revoke keys")
+  ok((await req('DELETE', `/api/ch/api-keys/${keyId}`, null, OT)).status === 200, 'owner revokes the key')
+  ok((await kreq('/api/ch/v1', KEY)).status === 401, 'a revoked key stops working')
+}
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

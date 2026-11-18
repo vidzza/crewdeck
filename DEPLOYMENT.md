@@ -104,7 +104,7 @@ Then delete the tunnel's `scheduler` public hostname. `/opt/crewdeck` holds the 
 ## Testing on this computer
 
 1. Install [Go](https://go.dev/dl/) and Node. The server is Crewdeck's own build of PocketBase 0.40.6 (`backend/server`), which adds push notifications; the scripts build it into `backend/bin/crewdeck-server`.
-2. Automatic backend test (156 checks, push notifications included):
+2. Automatic backend test (199 checks, push notifications, insights and the API included):
 
 ```bash
 ./backend/scripts/test.sh

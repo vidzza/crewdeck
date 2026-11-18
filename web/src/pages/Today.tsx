@@ -6,6 +6,7 @@ import { useData } from '../store'
 import { InstallSheet, isIOS, isStandalone, LocationPicker, NotifyCard, TopActions } from '../chrome'
 import { Avatar, Button, Card, Group, Page, Pill, Row, Sheet, TextRow, toast } from '../ui'
 import { Icon } from '../icons'
+import { InsightsCard } from './Insights'
 
 interface ClockRes {
   ok: boolean
@@ -109,6 +110,7 @@ export default function Today() {
   return (
     <Page title={firstName ? `Hi, ${firstName}` : 'Today'} eyebrow={fmtDayLong(now)} actions={<TopActions />}>
       {isAdmin(me) && <SetupChecklist />}
+      {isAdmin(me) && <InsightsCard />}
 
       <NotifyCard />
 

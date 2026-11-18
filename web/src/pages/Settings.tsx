@@ -65,6 +65,10 @@ export default function Settings() {
         <Row href="#/settings/team" icon="people" iconBg="#007aff" title="Team" value={users.filter((u) => u.active).length} chevron />
         <Row href="#/settings/positions" icon="tag" iconBg="#af52de" title="Positions" value={positions.filter((p) => p.active).length} chevron />
       </Group>
+      <Group header="Reports">
+        <Row href="#/insights" icon="chart" iconBg="#34c759" title="Insights" subtitle="Hours, labor cost, overtime, attendance" chevron />
+        <Row href="#/settings/api" icon="key" iconBg="#8e8e93" title="API Access" subtitle="Read-only keys for other tools" chevron />
+      </Group>
       <Group footer={`Server: ${API_URL}`}>
         <Row icon="share" iconBg="#34c759" title="Add to Home Screen" chevron onClick={() => setInstall(true)} />
       </Group>
