@@ -660,5 +660,23 @@ console.log('\n# Insights (analytics)')
   ok((await kreq('/api/ch/v1', KEY)).status === 401, 'a revoked key stops working')
 }
 
+console.log('\n# Password guessing is slowed down (per visitor, behind Cloudflare)')
+{
+  // Cloudflare sends the visitor's IP in CF-Connecting-IP; the test pretends to be two visitors.
+  const asVisitor = async (ip, identity, password) => {
+    const r = await fetch(API + '/api/collections/users/auth-with-password', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'CF-Connecting-IP': ip },
+      body: JSON.stringify({ identity, password }),
+    })
+    return r.status
+  }
+  const codes = []
+  for (let i = 0; i < 9; i++) codes.push(await asVisitor('203.0.113.7', 'owner@test.com', 'wrong-' + i))
+  ok(codes.slice(0, 6).every((c) => c === 400) && codes.slice(6).every((c) => c === 429), 'after 6 wrong tries, that visitor has to wait', codes)
+  ok((await asVisitor('198.51.100.20', 'owner@test.com', 'password123')) === 200, 'other people can still sign in')
+  ok(!!(await login('owner@test.com', 'password123'))?.token, 'requests from the Pi itself are never slowed down')
+}
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

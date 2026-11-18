@@ -178,6 +178,7 @@ export function inviteUrl(token: string) {
 export function errMsg(e: unknown): string {
   if (e instanceof ClientResponseError) {
     if (e.status === 0) return "Can't reach the server. Check your internet connection."
+    if (e.status === 429) return 'Too many tries. Wait a few seconds and try again.'
     const data = e.response as { message?: string; data?: Record<string, { message?: string }> }
     const nice: Record<string, string> = {
       phone_login: 'That phone number is already used by someone else.',
