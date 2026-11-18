@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { pb, errMsg, ACCESS_LABEL } from '../lib/pb'
 import { useData } from '../store'
-import { InstallSheet } from '../chrome'
+import { InstallSheet, NotificationsGroup } from '../chrome'
+import { disablePush } from '../lib/push'
 import { Avatar, Dot, Group, InputRow, Page, Row, Sheet, toast } from '../ui'
 
 export default function Account() {
@@ -26,6 +27,7 @@ export default function Account() {
           ))}
         </Group>
       )}
+      <NotificationsGroup />
       <Group>
         <Row icon="share" iconBg="#34c759" title="Add to Home Screen" chevron onClick={() => setInstall(true)} />
         <Row icon="pencil" iconBg="#8e8e93" title="Change Password" chevron onClick={() => setPw(true)} />
@@ -35,8 +37,10 @@ export default function Account() {
           title="Sign Out"
           tone="destructive"
           center
-          onClick={() => {
+          onClick={async () => {
             if (confirm('Sign out of Crewdeck?')) {
+              // This phone stops getting this person's notifications.
+              await disablePush()
               pb.authStore.clear()
               location.hash = '#/today'
             }

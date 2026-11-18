@@ -11,6 +11,7 @@ import Hours from './pages/Hours'
 import Settings, { LocationPage, LocationsPage, PositionsPage } from './pages/Settings'
 import Join, { WELCOME_KEY } from './pages/Join'
 import { LocationHelp, WelcomeSheet } from './chrome'
+import { syncBadge, syncPush } from './lib/push'
 import Team from './pages/Team'
 import Account from './pages/Account'
 import Notices from './pages/Notices'
@@ -114,13 +115,17 @@ function wantsWelcome() {
 }
 
 function Shell() {
-  const { me, loaded } = useData()
+  const { me, loaded, unread } = useData()
   const path = useHashPath()
   const [welcome, setWelcome] = useState(wantsWelcome)
   const locId = path.startsWith('/settings/locations/') ? path.slice('/settings/locations/'.length) : ''
   const entry = PAGES[path] && (!PAGES[path].admin || isAdmin(me)) ? PAGES[path] : PAGES['/today']
   const Page = entry.page
   const tabs = TABS.filter((t) => !t.admin || isAdmin(me))
+  useEffect(() => {
+    syncPush()
+  }, [me.id])
+  useEffect(() => syncBadge(unread), [unread])
   const closeWelcome = () => {
     setWelcome(false)
     try {

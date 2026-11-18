@@ -665,3 +665,21 @@ routerAdd(
   },
   $apis.requireSuperuserAuth(),
 )
+
+// ---------- cron: shift reminders and "still clocked in?" ----------
+cronAdd("crewdeck_reminders", "*/5 * * * *", () => {
+  const L = require(`${__hooks}/lib.js`)
+  L.sendReminders($app)
+})
+
+// Run the reminders by hand (dashboard superuser only; useful for tests).
+routerAdd(
+  "POST",
+  "/api/ch/admin/reminders",
+  (e) => {
+    const L = require(`${__hooks}/lib.js`)
+    L.sendReminders($app)
+    return e.json(200, { ok: true })
+  },
+  $apis.requireSuperuserAuth(),
+)

@@ -27,6 +27,11 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/server/go.mod
+          cache-dependency-path: backend/server/go.sum
+
       - name: Install app dependencies
         working-directory: web
         run: npm ci
@@ -35,16 +40,15 @@ jobs:
         working-directory: web
         run: npx tsc --noEmit -p .
 
-      - name: Backend tests
-        run: |
-          curl -fsSL -o /tmp/pb.zip https://github.com/pocketbase/pocketbase/releases/download/v0.40.6/pocketbase_0.40.6_linux_amd64.zip
-          mkdir -p backend/bin
-          unzip -q -o /tmp/pb.zip pocketbase -d backend/bin
-          ./backend/scripts/test.sh
+      - name: Backend tests (builds the Crewdeck server and tests it, push notifications included)
+        run: ./backend/scripts/test.sh
 
       - name: Build the release
         run: |
           mkdir -p out
+          # The server for the Pi (64-bit and 32-bit Raspberry Pi OS); install-pi.sh picks the right one.
+          ./backend/scripts/build-server.sh out/bin/crewdeck-server-linux-arm64 linux arm64
+          ./backend/scripts/build-server.sh out/bin/crewdeck-server-linux-armv7 linux arm 7
           (cd web && VITE_API_URL=/ npx vite build --outDir ../out/pb_public --emptyOutDir)
           cp -R backend/pb_hooks backend/pb_migrations out/
           cp backend/crewdeck.service backend/crewdeck.env.example backend/scripts/install-pi.sh \

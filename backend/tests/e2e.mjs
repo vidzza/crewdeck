@@ -335,5 +335,130 @@ if (su?.token) {
   ok(closed.clock_out && closed.flagged && !closed.approved, 'it was closed and marked for review', closed)
 } else console.log('  (no superuser: skipped)')
 
+console.log('\n# Push notifications')
+{
+  const http = await import('node:http')
+  const crypto = await import('node:crypto')
+  const PUSH_PORT = Number(process.env.PUSH_PORT || 8098)
+  // A fake push service, standing in for Apple/Google. Paths starting with /gone answer 410 (device unsubscribed).
+  const got = []
+  const fake = http.createServer((rq, rs) => {
+    const chunks = []
+    rq.on('data', (c) => chunks.push(c))
+    rq.on('end', () => {
+      got.push({ path: rq.url, headers: rq.headers, body: Buffer.concat(chunks) })
+      rs.writeHead(rq.url.startsWith('/gone') ? 410 : 201).end()
+    })
+  })
+  await new Promise((done) => fake.listen(PUSH_PORT, '127.0.0.1', done))
+
+  const b64u = (b) => Buffer.from(b).toString('base64url')
+  const device = () => {
+    const ecdh = crypto.createECDH('prime256v1')
+    ecdh.generateKeys()
+    return { ecdh, auth: crypto.randomBytes(16) }
+  }
+  const subOf = (d, path) => ({ endpoint: `http://127.0.0.1:${PUSH_PORT}${path}`, keys: { p256dh: b64u(d.ecdh.getPublicKey()), auth: b64u(d.auth) } })
+  // Decrypt a Web Push message the way a phone does (RFC 8291, aes128gcm).
+  const hmac = (k, d) => crypto.createHmac('sha256', k).update(d).digest()
+  const decrypt = (d, body) => {
+    try {
+      const salt = body.subarray(0, 16)
+      const idlen = body[20]
+      const asPub = body.subarray(21, 21 + idlen)
+      const ct = body.subarray(21 + idlen)
+      const uaPub = d.ecdh.getPublicKey()
+      const prkKey = hmac(d.auth, d.ecdh.computeSecret(asPub))
+      const ikm = hmac(prkKey, Buffer.concat([Buffer.from('WebPush: info\0'), uaPub, asPub, Buffer.from([1])]))
+      const prk = hmac(salt, ikm)
+      const cek = hmac(prk, Buffer.from('Content-Encoding: aes128gcm\0\x01')).subarray(0, 16)
+      const nonce = hmac(prk, Buffer.from('Content-Encoding: nonce\0\x01')).subarray(0, 12)
+      const dec = crypto.createDecipheriv('aes-128-gcm', cek, nonce)
+      dec.setAuthTag(ct.subarray(ct.length - 16))
+      const plain = Buffer.concat([dec.update(ct.subarray(0, ct.length - 16)), dec.final()])
+      let end = plain.length - 1
+      while (end >= 0 && plain[end] === 0) end--
+      return plain[end] === 2 ? JSON.parse(plain.subarray(0, end).toString()) : null
+    } catch {
+      return null
+    }
+  }
+  const waitPush = async (d, path, pred, ms = 6000) => {
+    const t0 = Date.now()
+    while (Date.now() - t0 < ms) {
+      for (const p of got) {
+        if (p.path !== path) continue
+        const msg = decrypt(d, p.body)
+        if (msg && pred(msg)) return { ...p, msg }
+      }
+      await new Promise((done) => setTimeout(done, 100))
+    }
+    return null
+  }
+
+  r = await req('GET', '/api/ch/push/key')
+  ok(r.status === 200 && /^[A-Za-z0-9_-]{80,}$/.test(r.data?.key || ''), 'public push key is served', r.data)
+  const d1 = device()
+  ok((await req('POST', '/api/ch/push/subscribe', subOf(d1, '/d1'))).status === 401, 'subscribing needs a signed-in person')
+  ok((await req('POST', '/api/ch/push/subscribe', { ...subOf(d1, '/d1'), endpoint: 'http://127.0.0.1:3000/x' }, T1)).status === 400, "can't point push at another app on the server")
+  ok((await req('POST', '/api/ch/push/subscribe', { ...subOf(d1, '/d1'), endpoint: 'https://evil.example.com/push' }, T1)).status === 400, 'only real push services are accepted')
+  ok((await req('POST', '/api/ch/push/subscribe', { ...subOf(d1, '/d1'), keys: { p256dh: 'abc', auth: 'def' } }, T1)).status === 400, 'broken device keys are refused')
+  r = await req('POST', '/api/ch/push/subscribe', subOf(d1, '/d1'), T1)
+  ok(r.status === 200, 'Beto turns on notifications', r.data)
+  ok((await req('GET', '/api/collections/push_subscriptions/records', null, OT)).status >= 400, "devices can't be listed through the API, not even by the owner")
+
+  r = await req('POST', '/api/ch/push/test', {}, T1)
+  ok(r.data?.sent === 1 && r.data?.failed === 0, 'test notification is delivered', r.data)
+  let p = await waitPush(d1, '/d1', (m) => m.title === 'Notifications are on')
+  ok(p, 'it decrypts on the device with the right title')
+  ok(p && p.headers['content-encoding'] === 'aes128gcm' && /^vapid t=.+, k=.+/.test(p.headers.authorization || '') && p.headers.ttl === '86400', 'it is encrypted and signed like real Web Push', p?.headers)
+
+  const soonStart = new Date(Date.now() + 30 * 60 * 1000)
+  r = await req('POST', '/api/collections/shifts/records', { location: loc.id, position: positions[2].id, user: e1.id, starts_at: soonStart.toISOString(), ends_at: new Date(soonStart.getTime() + 5 * H).toISOString(), published: true }, OT)
+  ok(r.status === 200, 'owner gives Beto a shift starting in 30 minutes', r.data)
+  const soonShift = r.data
+  p = await waitPush(d1, '/d1', (m) => m.title === 'You were assigned a shift')
+  ok(p && p.msg.url === '#/schedule' && p.msg.badge >= 1, 'in-app notification also arrives as a push, with the unread count', p?.msg)
+
+  if (su?.token) {
+    r = await req('POST', '/api/ch/admin/reminders', {}, su.token)
+    ok(r.status === 200, 'reminders run')
+    p = await waitPush(d1, '/d1', (m) => m.title.startsWith('⏰ Your shift starts at'))
+    ok(p && p.msg.url === '#/today', '"your shift starts" reminder reaches the phone', p?.msg)
+    await req('POST', '/api/ch/admin/reminders', {}, su.token)
+    const f = encodeURIComponent("title ~ 'Your shift starts'")
+    ok((await req('GET', `/api/collections/notifications/records?filter=${f}`, null, T1)).data.totalItems === 1, 'the reminder is sent only once')
+    r = await req('PATCH', `/api/collections/shifts/records/${soonShift.id}`, { starts_at: new Date(soonStart.getTime() + 10 * 60 * 1000).toISOString() }, OT)
+    ok(r.status === 200, 'owner moves the shift 10 minutes later', r.data)
+    await req('POST', '/api/ch/admin/reminders', {}, su.token)
+    ok((await req('GET', `/api/collections/notifications/records?filter=${f}`, null, T1)).data.totalItems === 2, 'a moved shift gets a new reminder')
+
+    r = await req('POST', '/api/collections/shifts/records', { location: loc.id, position: positions[3].id, user: e2.id, starts_at: new Date(Date.now() - 6 * H).toISOString(), ends_at: new Date(Date.now() - 40 * 60 * 1000).toISOString(), published: true }, OT)
+    ok(r.status === 200, 'a shift for Carla that ended 40 minutes ago', r.data)
+    const tc = await req('POST', '/api/collections/timecards/records', { user: e2.id, location: loc.id, shift: r.data.id, clock_in: new Date(Date.now() - 6 * H).toISOString() }, su.token)
+    ok(tc.status === 200, 'Carla is still clocked in for it', tc.data)
+    await req('POST', '/api/ch/admin/reminders', {}, su.token)
+    await req('POST', '/api/ch/admin/reminders', {}, su.token)
+    const f2 = encodeURIComponent("title = 'Still clocked in?'")
+    ok((await req('GET', `/api/collections/notifications/records?filter=${f2}`, null, T2)).data.totalItems === 1, '"still clocked in?" is sent once')
+  } else console.log('  (no superuser: reminders skipped)')
+
+  const d2 = device()
+  await req('POST', '/api/ch/push/subscribe', subOf(d2, '/gone'), T1)
+  r = await req('POST', '/api/ch/push/test', {}, T1)
+  ok(r.data?.sent === 1 && r.data?.failed === 1, 'a phone that unsubscribed fails…', r.data)
+  r = await req('POST', '/api/ch/push/test', {}, T1)
+  ok(r.data?.sent === 1 && r.data?.failed === 0, '…and is forgotten', r.data)
+
+  await req('POST', '/api/ch/push/unsubscribe', { endpoint: subOf(d1, '/d1').endpoint }, T2)
+  ok((await req('POST', '/api/ch/push/test', {}, T1)).data?.sent === 1, "someone else can't turn off Beto's phone")
+  await req('POST', '/api/ch/push/subscribe', subOf(d1, '/d1'), T2)
+  ok((await req('POST', '/api/ch/push/test', {}, T1)).data?.sent === 0, 'when Carla signs in on that phone, Beto stops getting pushes there')
+  ok((await req('POST', '/api/ch/push/test', {}, T2)).data?.sent === 1, '…and Carla gets them instead')
+  await req('POST', '/api/ch/push/unsubscribe', { endpoint: subOf(d1, '/d1').endpoint }, T2)
+  ok((await req('POST', '/api/ch/push/test', {}, T2)).data?.sent === 0, 'turning notifications off stops them')
+  fake.close()
+}
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

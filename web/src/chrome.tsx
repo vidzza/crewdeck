@@ -2,8 +2,10 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { addDays, fmtWeek, startOfWeek } from './lib/dates'
 import { detectPlatform, getPosition, readPosition, setLocationHelp, type Platform, type PosResult } from './lib/geo'
+import { disablePush, enablePush, pushStatus, sendTestPush, type PushStatus } from './lib/push'
+import { errMsg } from './lib/pb'
 import { useData } from './store'
-import { Avatar, Button, Group, HeaderButton, Row, Sheet, toast } from './ui'
+import { Avatar, Button, Card, Group, HeaderButton, Row, Sheet, Spinner, Switch, toast } from './ui'
 import { Icon } from './icons'
 
 // Bell + avatar in the top-right corner of every main screen.
@@ -107,38 +109,238 @@ export function LocationPicker() {
 export function WelcomeSheet({ onClose }: { onClose: () => void }) {
   const { company, me } = useData()
   const [loc, setLoc] = useState<'idle' | 'asking' | 'ok' | 'no'>('idle')
+  const [push, setPush] = usePushStatus()
+  const [pushBusy, setPushBusy] = useState(false)
   const askLocation = async () => {
     setLoc('asking')
     const g = await getPosition(15000)
     setLoc(g.pos ? 'ok' : 'no')
   }
+  const askPush = async () => {
+    setPushBusy(true)
+    setPush(await turnOnPush())
+    setPushBusy(false)
+  }
+  const canPush = push === 'off' || push === 'on' || push === 'blocked'
+  const steps: { header: string; footer: ReactNode; body: ReactNode }[] = []
+  if (canPush)
+    steps.push({
+      header: 'Turn on notifications',
+      footer: push === 'blocked' ? pushBlockedHelp() : 'Shift reminders, schedule changes and swap requests.',
+      body: (
+        <Row
+          icon="bell"
+          iconBg={push === 'on' ? '#34c759' : '#ff3b30'}
+          title={push === 'on' ? 'Notifications are on' : push === 'blocked' ? 'Notifications are blocked' : 'Turn On Notifications'}
+          tone={push === 'on' ? 'success' : push === 'blocked' ? undefined : 'link'}
+          accessory={pushBusy ? <Spinner small /> : undefined}
+          onClick={push === 'off' && !pushBusy ? askPush : undefined}
+        />
+      ),
+    })
+  steps.push({
+    header: 'Allow your location',
+    footer: "We only check it when you clock in or out, to confirm you're at work. We never track you.",
+    body: (
+      <Row
+        icon="pin"
+        iconBg={loc === 'ok' ? '#34c759' : '#007aff'}
+        title={loc === 'ok' ? 'Location allowed' : loc === 'no' ? "Location isn't allowed yet" : 'Allow Location'}
+        subtitle={loc === 'no' ? 'Turn it on in your phone settings for this browser, then try again.' : undefined}
+        tone={loc === 'ok' ? 'success' : 'link'}
+        onClick={loc === 'ok' || loc === 'asking' ? undefined : askLocation}
+      />
+    ),
+  })
+  if (!isStandalone())
+    steps.push({
+      header: 'Add Crewdeck to your Home Screen',
+      footer: push === 'needs-install' ? 'Then open Crewdeck from your Home Screen to turn on notifications.' : 'So it opens like any other app.',
+      body: (
+        <>
+          <Row leading={<Step n={1} />} title={<>Tap <b>Share</b> <Icon name="share" size={18} className="inline text-ios-blue" /> (iPhone) or the <b>⋮</b> menu (Android)</>} />
+          <Row leading={<Step n={2} />} title={<>Tap <b>Add to Home Screen</b></>} />
+        </>
+      ),
+    })
+  const count = ['', 'One quick thing:', 'Two quick things:', 'Three quick things:'][steps.length]
   return (
     <Sheet title="Welcome" onClose={onClose} onDone={onClose} doneLabel="Done">
       <div className="flex flex-col items-center text-center">
         <img src="./icon.svg" alt="" className="h-20 w-20 rounded-[18px] shadow-md" />
         <h3 className="mt-3 text-[24px] font-bold">You're in, {(me.name || '').split(' ')[0] || 'welcome'}!</h3>
         <p className="mt-1 text-[15px] text-ios-label2">
-          This is where you'll see your shifts at {company?.name || 'work'}, clock in and out, and swap shifts. Two quick things:
+          This is where you'll see your shifts at {company?.name || 'work'}, clock in and out, and swap shifts. {count}
         </p>
       </div>
-      <Group header="1. Allow your location" footer="We only check it when you clock in or out, to confirm you're at work. We never track you.">
-        <Row
-          icon="pin"
-          iconBg={loc === 'ok' ? '#34c759' : '#007aff'}
-          title={loc === 'ok' ? 'Location allowed' : loc === 'no' ? "Location isn't allowed yet" : 'Allow Location'}
-          subtitle={loc === 'no' ? 'Turn it on in your phone settings for this browser, then try again.' : undefined}
-          tone={loc === 'ok' ? 'success' : 'link'}
-          onClick={loc === 'ok' || loc === 'asking' ? undefined : askLocation}
-        />
-      </Group>
-      <Group header="2. Add Crewdeck to your Home Screen" footer="So it opens like any other app.">
-        <Row leading={<Step n={1} />} title={<>Tap <b>Share</b> <Icon name="share" size={18} className="inline text-ios-blue" /> (iPhone) or the <b>⋮</b> menu (Android)</>} />
-        <Row leading={<Step n={2} />} title={<>Tap <b>Add to Home Screen</b></>} />
-      </Group>
+      {steps.map((st, i) => (
+        <Group key={st.header} header={`${i + 1}. ${st.header}`} footer={st.footer}>
+          {st.body}
+        </Group>
+      ))}
       <Button size="lg" full onClick={onClose}>
         Get Started
       </Button>
     </Sheet>
+  )
+}
+
+// ---------- push notifications ----------
+export function usePushStatus() {
+  const [status, setStatus] = useState<PushStatus | null>(null)
+  useEffect(() => {
+    let alive = true
+    const check = () => pushStatus().then((s) => alive && setStatus(s), () => alive && setStatus('unsupported'))
+    check()
+    // Coming back from the phone's Settings app: show the new state.
+    const onVisible = () => document.visibilityState === 'visible' && check()
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      alive = false
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [])
+  return [status, setStatus] as const
+}
+
+async function turnOnPush(): Promise<PushStatus> {
+  try {
+    const s = await enablePush()
+    if (s === 'on') toast('Notifications are on')
+    else if (s === 'blocked') toast('Notifications are blocked. See the steps to turn them on.', 'info')
+    return s
+  } catch (e) {
+    toast(errMsg(e) || "Couldn't turn on notifications. Try again.", 'error')
+    return pushStatus()
+  }
+}
+
+function pushBlockedHelp(): ReactNode {
+  const p = detectPlatform()
+  if (p.startsWith('ios') || p === 'inapp-ios')
+    return (
+      <>
+        To turn them on: open the <b>Settings</b> app → <b>Notifications</b> → <b>Crewdeck</b> → turn on <b>Allow Notifications</b>.
+      </>
+    )
+  if (p === 'android' || p === 'inapp-android')
+    return (
+      <>
+        To turn them on: tap the icon to the left of the web address → <b>Permissions</b> → turn on <b>Notifications</b>. If you use the Home Screen app, press and hold its icon → <b>App info</b> → <b>Notifications</b>.
+      </>
+    )
+  if (p === 'mac-safari')
+    return (
+      <>
+        To turn them on: <b>Safari → Settings → Websites → Notifications</b> and set this site to <b>Allow</b>.
+      </>
+    )
+  if (p === 'mac-chrome')
+    return (
+      <>
+        To turn them on: click the icon to the left of the web address and set <b>Notifications</b> to <b>Allow</b>. Also check <b>System Settings → Notifications → Google Chrome</b>.
+      </>
+    )
+  return 'To turn them on, allow notifications for this site in your browser settings.'
+}
+
+// Account → Notifications: on/off for this phone or computer, plus a test.
+export function NotificationsGroup() {
+  const [status, setStatus] = usePushStatus()
+  const [busy, setBusy] = useState(false)
+  const [install, setInstall] = useState(false)
+  if (!status) return null
+  const toggle = async (on: boolean) => {
+    setBusy(true)
+    if (on) setStatus(await turnOnPush())
+    else {
+      await disablePush()
+      setStatus(await pushStatus())
+    }
+    setBusy(false)
+  }
+  const test = async () => {
+    try {
+      const r = await sendTestPush()
+      if (r.sent > 0) toast('Sent. It should show up in a few seconds.')
+      else toast("This device isn't getting notifications. Turn them off and on again.", 'error')
+    } catch (e) {
+      toast(errMsg(e), 'error')
+    }
+  }
+  const footer =
+    status === 'blocked'
+      ? pushBlockedHelp()
+      : status === 'needs-install'
+        ? 'On iPhone, notifications only work from the Home Screen app. Add Crewdeck to your Home Screen, open it from there, and turn them on here.'
+        : status === 'unsupported'
+          ? "This browser can't show notifications. Use Safari on iPhone, or Chrome on Android or a computer."
+          : 'Shift reminders, schedule changes and requests, on this phone or computer.'
+  return (
+    <>
+      <Group header="Notifications" footer={footer}>
+        {status === 'on' || status === 'off' ? (
+          <Row
+            icon="bell"
+            iconBg="#ff3b30"
+            title="Notifications"
+            accessory={busy ? <Spinner small /> : <Switch checked={status === 'on'} onChange={toggle} label="Notifications" />}
+          />
+        ) : status === 'needs-install' ? (
+          <Row icon="bell" iconBg="#ff3b30" title="Add to Home Screen First" tone="link" chevron onClick={() => setInstall(true)} />
+        ) : (
+          <Row icon="bell" iconBg="#8e8e93" title="Notifications" value={status === 'blocked' ? 'Blocked' : 'Not available'} />
+        )}
+        {status === 'on' && <Row title="Send a Test Notification" tone="link" onClick={test} />}
+      </Group>
+      {install && <InstallSheet onClose={() => setInstall(false)} />}
+    </>
+  )
+}
+
+// Today: one-tap prompt until notifications are on (or dismissed).
+export function NotifyCard() {
+  const [status, setStatus] = usePushStatus()
+  const [busy, setBusy] = useState(false)
+  const [hidden, setHidden] = useState(() => {
+    try {
+      return localStorage.getItem('hideNotifyTip') === '1'
+    } catch {
+      return false
+    }
+  })
+  if (status !== 'off' || hidden) return null
+  const on = async () => {
+    setBusy(true)
+    setStatus(await turnOnPush())
+    setBusy(false)
+  }
+  const dismiss = () => {
+    setHidden(true)
+    try {
+      localStorage.setItem('hideNotifyTip', '1')
+    } catch {
+      /* ignore */
+    }
+  }
+  return (
+    <Card>
+      <div className="flex items-start gap-3">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[10px] bg-ios-red text-white">
+          <Icon name="bell" size={24} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[17px] font-semibold">Get shift reminders</div>
+          <div className="text-[15px] text-ios-label2">Plus schedule changes and requests, right on this phone.</div>
+        </div>
+        <button type="button" aria-label="Dismiss" onClick={dismiss} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ios-fill text-ios-label2">
+          <Icon name="xmark" size={14} stroke={2.6} />
+        </button>
+      </div>
+      <Button full className="mt-3" busy={busy} onClick={on}>
+        Turn On Notifications
+      </Button>
+    </Card>
   )
 }
 

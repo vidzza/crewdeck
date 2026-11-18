@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Crewdeck auto-update. Runs every 2 minutes from crewdeck-update.timer (as root).
 # Checks the "release" branch on GitHub; if there's a new version it backs up Crewdeck
-# (app files + database), installs it, and rolls back if the new version doesn't start.
+# (server, app files and database), installs it, and rolls back if the new version doesn't start.
 # Only ever touches /opt/crewdeck and the crewdeck service — never other apps on the Pi.
 set -euo pipefail
 
@@ -36,6 +36,7 @@ for d in pb_hooks pb_migrations pb_public; do
   [ -d "$APP_DIR/$d" ] && cp -a "$APP_DIR/$d" "$BK/$d"
 done
 [ -f /etc/systemd/system/crewdeck.service ] && cp -a /etc/systemd/system/crewdeck.service "$BK/"
+[ -f "$APP_DIR/pocketbase" ] && cp -a "$APP_DIR/pocketbase" "$BK/pocketbase"
 
 if bash "$WORK/src/install-pi.sh"; then
   echo "$latest" > "$STATE"
@@ -55,6 +56,7 @@ else
     fi
   done
   [ -f "$BK/crewdeck.service" ] && cp -a "$BK/crewdeck.service" /etc/systemd/system/crewdeck.service
+  [ -f "$BK/pocketbase" ] && cp -a "$BK/pocketbase" "$APP_DIR/pocketbase"
   chown -R crewdeck:crewdeck "$APP_DIR"
   systemctl daemon-reload
   systemctl start crewdeck

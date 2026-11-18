@@ -380,6 +380,40 @@ function autoClose(app) {
   })
 }
 
+// ---------- reminders (sent as push notifications to phones that turned them on) ----------
+// • About 1 hour before a published shift starts (again if the shift is moved).
+// • 30 minutes after a shift ended, if the person is still clocked in (once per clock-in).
+function sendReminders(app) {
+  const now = new Date()
+  const soon = app.findRecordsByFilter(
+    "shifts",
+    "published = true && user != '' && starts_at > {:now} && starts_at <= {:until}",
+    "starts_at",
+    0,
+    0,
+    { now: pbDate(now), until: pbDate(new Date(now.getTime() + 3600 * 1000)) },
+  )
+  soon.forEach((s) => {
+    if (s.getString("reminded_at") === s.getString("starts_at")) return
+    const start = getDate(s, "starts_at")
+    const loc = findById(app, "locations", s.getString("location"))
+    const pos = findById(app, "positions", s.getString("position"))
+    const where = [loc ? loc.getString("name") : "", pos ? pos.getString("name") : ""].filter((x) => x).join(" · ")
+    notify(app, [s.getString("user")], "⏰ Your shift starts at " + fmtTime(start), where || fmtShift(s), "#/today")
+    s.set("reminded_at", s.getString("starts_at"))
+    app.save(s)
+  })
+
+  app.findRecordsByFilter("timecards", "clock_out = '' && out_reminded = false && shift != ''", "", 0, 0).forEach((tc) => {
+    const shift = findById(app, "shifts", tc.getString("shift"))
+    const end = shift ? getDate(shift, "ends_at") : null
+    if (!end || now.getTime() < end.getTime() + 30 * 60 * 1000) return
+    notify(app, [tc.getString("user")], "Still clocked in?", "Your shift ended at " + fmtTime(end) + ". Clock out if you're done.", "#/today")
+    tc.set("out_reminded", true)
+    app.save(tc)
+  })
+}
+
 // ---------- shifts ----------
 function overlappingShifts(app, userId, s, e, excludeIds) {
   if (!userId) return []
@@ -435,6 +469,7 @@ module.exports = {
   clockOut,
   toggleBreak,
   autoClose,
+  sendReminders,
   conflictsFor,
   overlappingShifts,
   checkGeo,

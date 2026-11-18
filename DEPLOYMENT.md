@@ -103,8 +103,8 @@ Then delete the tunnel's `scheduler` public hostname. `/opt/crewdeck` holds the 
 
 ## Testing on this computer
 
-1. Put PocketBase 0.40.6 for your system at `backend/bin/pocketbase` ([download](https://github.com/pocketbase/pocketbase/releases/tag/v0.40.6)).
-2. Automatic backend test (98 checks):
+1. Install [Go](https://go.dev/dl/) and Node. The server is Crewdeck's own build of PocketBase 0.40.6 (`backend/server`), which adds push notifications; the scripts build it into `backend/bin/crewdeck-server`.
+2. Automatic backend test (156 checks, push notifications included):
 
 ```bash
 ./backend/scripts/test.sh

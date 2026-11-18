@@ -52,8 +52,31 @@ echo "==> Service user"
 id crewdeck >/dev/null 2>&1 || useradd --system --home "$APP_DIR" --shell /usr/sbin/nologin crewdeck
 mkdir -p "$APP_DIR/pb_data" "$APP_DIR/backups"
 
+# The server: Crewdeck's own build of PocketBase (adds push notifications), shipped in the release.
+# Releases without it fall back to the official PocketBase download.
+NEW_BIN="$REL/bin/crewdeck-server-linux-$ARCH"
+SWAPPED=""
 CURRENT=""
-if [ -x "$APP_DIR/pocketbase" ]; then
+if [ -f "$NEW_BIN" ]; then
+  chmod 0755 "$NEW_BIN"
+  # Make sure it runs on this Pi before replacing anything (empty folders: hooks/migrations can't interfere).
+  VTMP="$(mktemp -d)"
+  if ! "$NEW_BIN" --version --dir="$VTMP/d" --hooksDir="$VTMP/h" --migrationsDir="$VTMP/m" >/dev/null 2>&1; then
+    rm -rf "$VTMP"
+    die "The new Crewdeck server doesn't run on this Pi ($(uname -m)). The installed version was left as it was."
+  fi
+  rm -rf "$VTMP"
+  if cmp -s "$NEW_BIN" "$APP_DIR/pocketbase"; then
+    echo "==> Crewdeck server already up to date"
+  else
+    echo "==> Installing the Crewdeck server ($ARCH)"
+    [ -f "$APP_DIR/pocketbase" ] && cp -a "$APP_DIR/pocketbase" "$APP_DIR/pocketbase.prev"
+    install -m 0755 "$NEW_BIN" "$APP_DIR/pocketbase.new"
+    mv -f "$APP_DIR/pocketbase.new" "$APP_DIR/pocketbase"
+    SWAPPED=1
+  fi
+  CURRENT="$PB_VERSION" # skip the official download below
+elif [ -x "$APP_DIR/pocketbase" ]; then
   # Point it at empty folders so a bad hook or migration can't break the version check.
   VTMP="$(mktemp -d)"
   CURRENT="$("$APP_DIR/pocketbase" --version --dir="$VTMP/d" --hooksDir="$VTMP/h" --migrationsDir="$VTMP/m" 2>/dev/null | awk '{print $NF}')" || CURRENT=""
@@ -91,7 +114,14 @@ for _ in $(seq 1 30); do
   if curl -fsS "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1; then ok=1; break; fi
   sleep 1
 done
-[ -n "$ok" ] || die "Crewdeck did not start. Check: journalctl -u crewdeck -n 50 (nothing else was touched)."
+if [ -z "$ok" ]; then
+  if [ -n "$SWAPPED" ] && [ -f "$APP_DIR/pocketbase.prev" ]; then
+    echo "!! The new server didn't start: putting the previous one back"
+    mv -f "$APP_DIR/pocketbase.prev" "$APP_DIR/pocketbase"
+    systemctl restart crewdeck || true
+  fi
+  die "Crewdeck did not start. Check: journalctl -u crewdeck -n 50 (nothing else was touched)."
+fi
 echo "==> Crewdeck is running on http://127.0.0.1:$PORT"
 
 # Auto-update from GitHub (only Crewdeck; see crewdeck-update.sh).

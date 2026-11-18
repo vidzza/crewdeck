@@ -3,7 +3,7 @@ import { pb, api, errMsg, isAdmin, isMgr, isNotFound, type Shift, type Timecard 
 import { d, fmtDay, fmtDayLong, fmtHours, fmtRange, fmtTime, hoursBetween } from '../lib/dates'
 import { getPosition, GEO_LABEL, GEO_TONE, type Pos } from '../lib/geo'
 import { useData } from '../store'
-import { InstallSheet, isStandalone, LocationPicker, TopActions } from '../chrome'
+import { InstallSheet, isIOS, isStandalone, LocationPicker, NotifyCard, TopActions } from '../chrome'
 import { Avatar, Button, Card, Group, Page, Pill, Row, Sheet, TextRow, toast } from '../ui'
 import { Icon } from '../icons'
 
@@ -110,11 +110,13 @@ export default function Today() {
     <Page title={firstName ? `Hi, ${firstName}` : 'Today'} eyebrow={fmtDayLong(now)} actions={<TopActions />}>
       {isAdmin(me) && <SetupChecklist />}
 
+      <NotifyCard />
+
       {!isStandalone() && !hideTip && (
         <Card className="flex items-center gap-3">
           <img src="./icon.svg" alt="" className="h-11 w-11 rounded-[10px]" />
           <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setInstall(true)}>
-            <div className="text-[15px] font-semibold">Add Crewdeck to your Home Screen</div>
+            <div className="text-[15px] font-semibold">Add Crewdeck to your Home Screen{isIOS() ? ' to get notifications' : ''}</div>
             <div className="text-[13px] text-ios-blue">Show me how</div>
           </button>
           <button type="button" aria-label="Dismiss" onClick={dismissTip} className="flex h-8 w-8 items-center justify-center rounded-full bg-ios-fill text-ios-label2">
