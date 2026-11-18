@@ -63,6 +63,7 @@ export default function Settings() {
           chevron
         />
         <Row href="#/settings/team" icon="people" iconBg="#007aff" title="Team" value={users.filter((u) => u.active).length} chevron />
+        <Row href="#/settings/access" icon="key" iconBg="#ff9500" title="Access Levels" value="Who can do what" chevron />
         <Row href="#/settings/positions" icon="tag" iconBg="#af52de" title="Positions" value={positions.filter((p) => p.active).length} chevron />
       </Group>
       <Group header="Reports">

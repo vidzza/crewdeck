@@ -43,6 +43,25 @@ export function fmtTime(x: Date | string | null) {
   return `${h % 12 || 12}:${pad(v.getMinutes())} ${h < 12 ? 'AM' : 'PM'}`
 }
 
+// "8 PM", "8:30 PM" (no ":00" — easier to scan in a grid)
+export function fmtClock(x: Date | string | null) {
+  const v = d(x)
+  if (!v) return '—'
+  const h = v.getHours()
+  const m = v.getMinutes()
+  return `${h % 12 || 12}${m ? `:${pad(m)}` : ''} ${h < 12 ? 'AM' : 'PM'}`
+}
+// "8p", "8:30p" for tight spaces
+export function fmtClockShort(x: Date | string | null) {
+  const v = d(x)
+  if (!v) return '—'
+  const h = v.getHours()
+  const m = v.getMinutes()
+  return `${h % 12 || 12}${m ? `:${pad(m)}` : ''}${h < 12 ? 'a' : 'p'}`
+}
+// "26h", "26.5h"
+export const fmtH = (h: number) => `${Math.round(h * 10) / 10}h`
+
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 

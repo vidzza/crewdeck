@@ -12,7 +12,7 @@ import Settings, { LocationPage, LocationsPage, PositionsPage } from './pages/Se
 import Join, { WELCOME_KEY } from './pages/Join'
 import { LocationHelp, WelcomeSheet } from './chrome'
 import { syncBadge, syncPush } from './lib/push'
-import Team from './pages/Team'
+import Team, { AccessLevelsPage } from './pages/Team'
 import Account from './pages/Account'
 import Notices from './pages/Notices'
 import Insights, { ApiAccessPage } from './pages/Insights'
@@ -28,6 +28,7 @@ const PAGES: Record<string, { page: ComponentType; admin?: boolean }> = {
   '/notifications': { page: Notices },
   '/settings': { page: Settings, admin: true },
   '/settings/team': { page: Team, admin: true },
+  '/settings/access': { page: AccessLevelsPage, admin: true },
   '/settings/locations': { page: LocationsPage, admin: true },
   '/settings/positions': { page: PositionsPage, admin: true },
   '/settings/api': { page: ApiAccessPage, admin: true },

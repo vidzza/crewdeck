@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { ClientResponseError } from 'pocketbase'
-import { pb, api, errMsg, isAdmin, isMgr, type ShiftRequest, type TimeOff, type TimeOffKind } from '../lib/pb'
+import { pb, api, errMsg, isAdmin, isMgr, isOwner, type ShiftRequest, type TimeOff, type TimeOffKind } from '../lib/pb'
 import { addDays, d, fmtDay, fmtShift, fromInputs, toDateInput } from '../lib/dates'
 import { useData } from '../store'
 import { TopActions } from '../chrome'
@@ -9,9 +9,9 @@ import { Button, Card, Empty, Group, InputRow, Page, Pill, Row, Segmented, Secti
 const TYPE: Record<string, string> = { cover: 'Cover', swap: 'Swap', drop: 'Drop Shift', pickup: 'Pick Up Open Shift' }
 const REQ_STATUS: Record<string, { t: string; tone: Tone }> = {
   pending_peer: { t: 'Waiting for coworker', tone: 'blue' },
-  pending_admin: { t: 'Waiting for approval', tone: 'orange' },
+  pending_admin: { t: 'Waiting for the owner', tone: 'orange' },
   approved: { t: 'Approved', tone: 'green' },
-  rejected: { t: 'Declined by admin', tone: 'red' },
+  rejected: { t: 'Declined by the owner', tone: 'red' },
   declined: { t: "Coworker can't", tone: 'red' },
   cancelled: { t: 'Cancelled', tone: 'gray' },
 }
@@ -72,7 +72,7 @@ function ShiftChanges() {
       await api(`/api/ch/requests/${r.id}/${action}`, { note, ...extra })
       toast(
         {
-          accept: 'Accepted. Now the owner/admin approves it.',
+          accept: 'Accepted. Now the owner approves it.',
           decline: "Got it. We'll let them know.",
           cancel: 'Request cancelled',
           approve: 'Approved',
@@ -81,7 +81,7 @@ function ShiftChanges() {
       )
       await load()
     } catch (e) {
-      // 409 = conflict (overlap or time off). The admin decides whether to approve anyway.
+      // 409 = conflict (overlap or time off). The owner decides whether to approve anyway.
       if (e instanceof ClientResponseError && e.status === 409 && action === 'approve') {
         const msg = (e.response as { message?: string }).message
         if (confirm(`Heads up: ${msg}\n\nApprove anyway?`)) return act(r, 'approve', { force: true })
@@ -94,12 +94,14 @@ function ShiftChanges() {
   if (!list) return <Spinner />
 
   const open = (r: ShiftRequest) => r.status === 'pending_peer' || r.status === 'pending_admin'
-  const toApprove = isAdmin(me) ? list.filter((r) => r.status === 'pending_admin') : []
+  // Only the owner approves shift changes. Admins and managers can see what's waiting.
+  const toApprove = isOwner(me) ? list.filter((r) => r.status === 'pending_admin') : []
+  const waitingOwner = !isOwner(me) && isMgr(me) ? list.filter((r) => r.status === 'pending_admin' && r.requester !== me.id) : []
   const forMe = list.filter((r) => r.status === 'pending_peer' && r.requester !== me.id && (r.target_user === me.id || (r.type === 'cover' && !r.target_user)))
   const mine = list.filter((r) => r.requester === me.id && open(r))
   const others = isMgr(me) ? list.filter((r) => r.status === 'pending_peer' && r.requester !== me.id && !forMe.includes(r)) : []
   const history = list.filter((r) => !open(r)).slice(0, 30)
-  const nothing = !toApprove.length && !forMe.length && !mine.length && !others.length
+  const nothing = !toApprove.length && !waitingOwner.length && !forMe.length && !mine.length && !others.length
 
   const btn = (r: ShiftRequest, action: string, label: string, variant: 'tinted' | 'tinted-green' | 'tinted-red' | 'gray' | 'primary') => (
     <Button size="sm" variant={variant} busy={busy === r.id + action} disabled={!!busy} onClick={() => act(r, action)}>
@@ -134,6 +136,13 @@ function ShiftChanges() {
           ))}
         </CardList>
       )}
+      {waitingOwner.length > 0 && (
+        <CardList title="Waiting for the Owner" footer="Only the owner approves shift changes and open-shift pickups.">
+          {waitingOwner.map((r) => (
+            <ReqCard key={r.id} r={r} />
+          ))}
+        </CardList>
+      )}
       {forMe.length > 0 && (
         <CardList title="Asked of You">
           {forMe.map((r) => (
@@ -157,7 +166,7 @@ function ShiftChanges() {
         <CardList title="Waiting on Coworkers">
           {others.map((r) => (
             <ReqCard key={r.id} r={r}>
-              {isAdmin(me) && btn(r, 'reject', 'Decline', 'tinted-red')}
+              {isOwner(me) && btn(r, 'reject', 'Decline', 'tinted-red')}
             </ReqCard>
           ))}
         </CardList>
@@ -173,11 +182,12 @@ function ShiftChanges() {
   )
 }
 
-function CardList({ title, children }: { title: string; children: ReactNode }) {
+function CardList({ title, footer, children }: { title: string; footer?: string; children: ReactNode }) {
   return (
     <section>
       <SectionTitle>{title}</SectionTitle>
       <div className="space-y-2.5">{children}</div>
+      {footer && <p className="px-4 pt-2 text-[13px] text-ios-label2">{footer}</p>}
     </section>
   )
 }
@@ -186,7 +196,7 @@ function ReqCard({ r, children, muted }: { r: ShiftRequest; children?: ReactNode
   const { me, userName, position } = useData()
   const s = r.expand?.shift
   const ts = r.expand?.target_shift
-  const st = REQ_STATUS[r.status]
+  const st = r.status === 'pending_admin' && isOwner(me) ? { t: 'Waiting for you', tone: 'orange' as Tone } : REQ_STATUS[r.status]
   const name = (id: string) => (id === me.id ? 'You' : userName(id))
   let who = name(r.requester)
   if (r.type === 'cover') who += r.target_user ? ` → ${name(r.target_user)}` : ' → anyone'
@@ -210,7 +220,7 @@ function ReqCard({ r, children, muted }: { r: ShiftRequest; children?: ReactNode
       )}
       {ts && <div className="text-[15px] text-ios-label2">for {fmtShift(ts)}</div>}
       {r.note && <div className="mt-2 text-[15px] italic text-ios-label2">“{r.note}”</div>}
-      {r.decision_note && <div className="mt-1 text-[15px] text-ios-label2">Admin: “{r.decision_note}”</div>}
+      {r.decision_note && <div className="mt-1 text-[15px] text-ios-label2">Owner: “{r.decision_note}”</div>}
       <div className="mt-2 text-[13px] text-ios-label3">
         {fmtDay(r.created)}
         {r.decided_by ? ` · ${r.status === 'approved' ? 'approved' : 'declined'} by ${name(r.decided_by)}` : ''}

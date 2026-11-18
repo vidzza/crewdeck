@@ -138,7 +138,11 @@ export interface PayRate extends Base {
   hourly: number
 }
 
+export const isOwner = (u?: User | null) => !!u && u.access === 'owner'
 export const isAdmin = (u?: User | null) => !!u && (u.access === 'owner' || u.access === 'admin')
+/** Owner > Admin > Manager > Employee: admins manage managers and employees; the owner manages everyone. */
+export const canManage = (actor?: User | null, target?: Pick<User, 'access'> | null) =>
+  isOwner(actor) || (isAdmin(actor) && !!target && target.access !== 'owner' && target.access !== 'admin')
 export const isMgr = (u?: User | null) => !!u && (u.access === 'owner' || u.access === 'admin' || u.access === 'manager')
 
 export const ACCESS_LABEL: Record<Access, string> = {

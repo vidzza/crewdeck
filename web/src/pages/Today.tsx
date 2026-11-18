@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { pb, api, errMsg, isAdmin, isMgr, isNotFound, type Shift, type Timecard } from '../lib/pb'
+import { pb, api, errMsg, isAdmin, isMgr, isNotFound, isOwner, type Shift, type Timecard } from '../lib/pb'
 import { d, fmtDay, fmtDayLong, fmtHours, fmtRange, fmtTime, hoursBetween } from '../lib/dates'
 import { getPosition, GEO_LABEL, GEO_TONE, type Pos } from '../lib/geo'
 import { useData } from '../store'
@@ -276,7 +276,7 @@ function ManagerPanel({ userName }: { userName: (id: string) => string }) {
   return (
     <>
       <Group header="Needs Your Attention">
-        {isAdmin(me) && <Row icon="swap" iconBg="#007aff" title="Shift changes to approve" accessory={badge(counts.requests)} chevron href="#/requests" />}
+        {isOwner(me) && <Row icon="swap" iconBg="#007aff" title="Shift changes to approve" accessory={badge(counts.requests)} chevron href="#/requests" />}
         {isAdmin(me) && <Row icon="sun" iconBg="#ff9500" title="Time off to approve" accessory={badge(counts.timeoff)} chevron href="#/timeoff" />}
         <Row icon="alert" iconBg="#ff3b30" title="Clock-ins to review" accessory={badge(counts.flagged)} chevron href="#/hours" />
       </Group>

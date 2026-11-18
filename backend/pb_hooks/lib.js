@@ -10,6 +10,9 @@ const MAX_ACCURACY_M = 200 // above this the GPS fix is not trustworthy
 function access(u) {
   return u ? u.getString("access") : ""
 }
+function isOwner(u) {
+  return access(u) === "owner"
+}
 function isAdmin(u) {
   return ADMIN.indexOf(access(u)) >= 0
 }
@@ -150,6 +153,27 @@ function telegram(text) {
 function notifyAdmins(app, title, text, link) {
   notify(app, adminIds(app), title, text, link)
   telegram(title + (text ? "\n" + text : ""))
+}
+// Shift changes and open-shift pickups are approved by the owner only.
+function ownerIds(app) {
+  return app.findRecordsByFilter("users", "active = true && access = 'owner'", "", 0, 0).map((r) => r.id)
+}
+function notifyOwners(app, title, text, link) {
+  notify(app, ownerIds(app), title, text, link)
+  telegram(title + (text ? "\n" + text : ""))
+}
+// Admins manage managers and employees; only the owner manages admins and owners.
+function canManage(actor, target) {
+  if (isOwner(actor)) return true
+  return isAdmin(actor) && !isAdmin(target)
+}
+function guardPay(app, e, userIds) {
+  const me = e.auth
+  if (!me || me.collection().name !== "users") return // dashboard superuser
+  userIds.forEach((id) => {
+    const target = findById(app, "users", id)
+    if (target && !canManage(me, target)) throw new ForbiddenError("Only the owner can set pay for admins and the owner.")
+  })
 }
 function audit(app, actorId, action, coll, id, data) {
   const r = new Record(app.findCollectionByNameOrId("audit_log"))
@@ -443,7 +467,10 @@ function conflictsFor(app, userId, shift, excludeIds) {
 }
 
 module.exports = {
+  isOwner,
   isAdmin,
+  canManage,
+  guardPay,
   isMgr,
   requireUser,
   requireAdmin,
@@ -463,7 +490,9 @@ module.exports = {
   userName,
   notify,
   notifyAdmins,
+  notifyOwners,
   adminIds,
+  ownerIds,
   audit,
   clockIn,
   clockOut,

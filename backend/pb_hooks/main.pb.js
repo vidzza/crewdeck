@@ -76,7 +76,7 @@ routerAdd(
     const b = L.body(e)
     const u = L.findById($app, "users", b.user)
     if (!u) throw new NotFoundError("Person not found.")
-    if (u.getString("access") === "owner" && me.getString("access") !== "owner") throw new ForbiddenError("Only the owner can do this for the owner.")
+    if (u.id !== me.id && !L.canManage(me, u)) throw new ForbiddenError("Only the owner can do this for an admin or the owner.")
     if (!u.getBool("active")) throw new BadRequestError("Turn this person back on first.")
     // One live link per person: older links stop working.
     $app.findRecordsByFilter("invites", "user = {:u}", "", 0, 0, { u: u.id }).forEach((i) => $app.delete(i))
@@ -175,7 +175,7 @@ routerAdd(
 
 // ---------- shift changes ----------
 // Types: cover (someone takes my shift), swap, drop (give it up), pickup (claim an open shift).
-// They ALWAYS end in pending_admin: only the owner/admin approves.
+// They ALWAYS end in pending_admin ("waiting for the owner"): only the owner approves.
 routerAdd(
   "POST",
   "/api/ch/requests",
@@ -250,7 +250,7 @@ routerAdd(
     } else if (type === "swap") {
       L.notify($app, [targetUser], me + " wants to swap shifts", "Their " + when + " for your " + L.fmtShift(targetShift), "#/requests")
     } else {
-      L.notifyAdmins(
+      L.notifyOwners(
         $app,
         type === "drop" ? "🔁 " + me + " wants to drop a shift" : "🙋 " + me + " wants to pick up an open shift",
         when + " · Waiting for your approval",
@@ -294,8 +294,8 @@ routerAdd(
       r.set("status", "pending_admin")
       r.set("peer_responded_at", now.toISOString())
       $app.save(r)
-      L.notify($app, [requester], me + " accepted your request", when + " · Waiting for admin approval", "#/requests")
-      L.notifyAdmins($app, "🔁 Shift change needs approval", L.userName($app, requester) + " → " + me + " · " + when, "#/requests")
+      L.notify($app, [requester], me + " accepted your request", when + " · Waiting for the owner's approval", "#/requests")
+      L.notifyOwners($app, "🔁 Shift change needs approval", L.userName($app, requester) + " → " + me + " · " + when, "#/requests")
       return e.json(200, { ok: true })
     }
 
@@ -310,7 +310,7 @@ routerAdd(
     }
 
     if (action === "cancel") {
-      if (requester !== u.id && !L.isAdmin(u)) throw new ForbiddenError("Only the person who asked can cancel it.")
+      if (requester !== u.id && !L.isOwner(u)) throw new ForbiddenError("Only the person who asked can cancel it.")
       if (status !== "pending_peer" && status !== "pending_admin") throw new BadRequestError("It can no longer be cancelled.")
       r.set("status", "cancelled")
       $app.save(r)
@@ -318,7 +318,7 @@ routerAdd(
     }
 
     if (action === "reject") {
-      if (!L.isAdmin(u)) throw new ForbiddenError("Only the owner or an admin can approve or reject shift changes.")
+      if (!L.isOwner(u)) throw new ForbiddenError("Only the owner can approve or decline shift changes.")
       if (status !== "pending_peer" && status !== "pending_admin") throw new BadRequestError("This request has already been resolved.")
       r.set("status", "rejected")
       r.set("decided_by", u.id)
@@ -331,7 +331,7 @@ routerAdd(
     }
 
     if (action === "approve") {
-      if (!L.isAdmin(u)) throw new ForbiddenError("Only the owner or an admin can approve shift changes.")
+      if (!L.isOwner(u)) throw new ForbiddenError("Only the owner can approve shift changes.")
       if (status !== "pending_admin") throw new BadRequestError("This request isn't ready to be approved.")
       const target = r.getString("target_user")
       const ts = type === "swap" ? L.findById($app, "shifts", r.getString("target_shift")) : null
@@ -647,6 +647,21 @@ onRecordUpdateRequest((e) => {
     throw new BadRequestError("Keep a phone number or an email so they can sign in.")
   e.next()
 }, "users")
+
+// Pay: admins set wages for managers and employees only. Their own pay, other admins'
+// and the owner's are set by the owner.
+onRecordCreateRequest((e) => {
+  require(`${__hooks}/lib.js`).guardPay($app, e, [e.record.getString("user")])
+  e.next()
+}, "pay_rates")
+onRecordUpdateRequest((e) => {
+  require(`${__hooks}/lib.js`).guardPay($app, e, [e.record.original().getString("user"), e.record.getString("user")])
+  e.next()
+}, "pay_rates")
+onRecordDeleteRequest((e) => {
+  require(`${__hooks}/lib.js`).guardPay($app, e, [e.record.getString("user")])
+  e.next()
+}, "pay_rates")
 
 // ---------- cron: close forgotten clock-ins ----------
 cronAdd("crewdeck_autoclose", "*/15 * * * *", () => {

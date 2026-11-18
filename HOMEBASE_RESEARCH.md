@@ -41,7 +41,7 @@
 - Its big design idea: **it separates "access level" (Owner / General Manager / Manager / Employee) from "role" (bartender, barback…)**. We copy that separation. ✅
 - What users complain about most: **a rigid geofence (only 150 ft / 1 block / 5 blocks), GPS blocking people who are actually on site, offline mode that doesn't work, lost notifications, reports that can't be customized, limited messaging, per-location pricing with add-ons that pile up, and slow bot-first support**. 🟡
 - **Our version:** a PWA (installable web app) on **GitHub Pages**, with the backend on the **Pi 3B+** using **PocketBase** (one binary: SQLite database, login, realtime and files). The Pi is published to the internet with **Cloudflare Tunnel** (no router ports opened) at `api.yourdomain.com`. Backups go to Cloudflare R2. Monthly cost ≈ **$0** plus power and the domain. 🔵
-- **Your key rules:** every shift change is **always** approved by the owner/admin; positions GM, AM, Bartender, Barback, Cocktail and Bouncer; GPS when clocking in; schedules; time off; a location with 4 sections; **anyone** must be able to use it easily.
+- **Your key rules:** every shift change and open-shift pickup is **always** approved by **the owner** (owner only since Nov 18, 2026); positions GM, AM, Bartender, Barback, Cocktail and Bouncer; GPS when clocking in; schedules; time off; a location with 4 sections; **anyone** must be able to use it easily.
 
 ---
 
@@ -548,7 +548,7 @@ TABLET APP "Time Clock by Homebase": employee list → PIN → photo → in/out/
 
 | Your note | How we read it | Requirement |
 |---|---|---|
-| *"Switch times / approve by the admin/owner always"* | Every **shift change** (trade, cover, drop, pick up an open shift) and every schedule change **is always approved by the owner or an admin**. Never automatic. | **R1.** No auto-approval of changes. The "approve shift changes" permission is **Owner/Admin only** and separate from "edit schedules". Optional: the GM/AM can **recommend** and the owner gives the final OK. Everything is logged. ✅ Built. |
+| *"Switch times / approve by the admin/owner always"* | Every **shift change** (trade, cover, drop, pick up an open shift) **is always approved by the owner**. Never automatic. | **R1.** No auto-approval of changes. The "approve shift changes" permission is **Owner only** (decided Nov 18, 2026) and separate from "edit schedules". Optional: the GM/AM can **recommend** and the owner gives the final OK. Everything is logged. ✅ Built. |
 | *"Roles: general manager, assistant manager, bartender, barback, cocktails, bouncer"* | The bar's **positions** | **R2.** Preset positions: General Manager, Assistant Manager, Bartender, Barback, Cocktail (cocktail server), Bouncer (security). Each with a color, default wage and required certifications, separate from the **access level**. ✅ Built (certifications pending). |
 | *"GPS to make sure they're where they sign in"* | Verify they're on site when clocking in | **R3.** Geofence with a **free radius in meters** (or polygon) per location **and per section**. Lat/lng, **accuracy** and distance are saved. If outside or the signal is weak: **don't hard-block**; send it for **approval** with a reason (and optionally a selfie). Extra signal: **the bar Wi-Fi's IP**. ✅ Built (radius per location/section; selfie and Wi-Fi IP pending). |
 | *"Schedules"* | Scheduling | **R4.** Weekly builder, templates, copy week, open shifts, publish with notification and shifts **"until close"**. ✅ Built (templates and "until close" pending). |
@@ -565,7 +565,7 @@ TABLET APP "Time Clock by Homebase": employee list → PIN → photo → in/out/
 - **Locations and sections**, with geofences.
 - Scheduling: week and day (+ month), templates, copy week, open shifts, draft and published, conflicts, estimated labor cost.
 - Availability and **time off** with simple policies.
-- **Trades, covers, drops and open-shift pickups**, always with owner/admin approval.
+- **Trades, covers, drops and open-shift pickups**, always with the owner's approval.
 - **Time clock:** phone with GPS, **tablet or kiosk with PIN and selfie**, breaks, early clock-in blocking, reminders and assisted clock-out.
 - **Timesheets** with issues, review, lock and edit history, and CSV export for payroll.
 - Overtime (configurable per country or state).
@@ -600,7 +600,7 @@ TABLET APP "Time Clock by Homebase": employee list → PIN → photo → in/out/
 | 5 | IP isn't used | **Extra signal:** if the request comes from the bar Wi-Fi's public IP, confidence is high |
 | 6 | Early clock-in allowed by default | **Blocking on by default** (e.g. 10 min before), configurable |
 | 7 | No "until close" shifts | **Open-ended shift** ("until close"); closed on clock-out or at a cap time |
-| 8 | Approving trades is part of "edit schedules" | **A separate permission exclusive to owner/admin**, with an optional 2-step flow (the GM recommends and the owner approves) |
+| 8 | Approving trades is part of "edit schedules" | **A separate permission exclusive to the owner**, with an optional 2-step flow (the GM recommends and the owner approves) |
 | 9 | Open shifts shown even with a conflict; pending requests aren't visible | **You only see what you can actually take** and your request shows as **pending** on your schedule |
 | 10 | No note on approve/decline; PTO balance not validated | **Required note when declining**; balance validation; policies **per position or location** |
 | 11 | Notifications that don't arrive and a broken unread counter | **Notification center** with a reliable badge, a **"test notification"** button, per-user push status visible to the admin, **email or Telegram fallback** if push fails |
@@ -808,7 +808,7 @@ audit_log               →actor, action, entity, entity_id, before{json}, after
 
 ## 11. Business rules and flows
 
-### 11.1 Shift change (always approved by the owner or an admin)
+### 11.1 Shift change (always approved by the owner)
 
 ```mermaid
 stateDiagram-v2
@@ -817,8 +817,8 @@ stateDiagram-v2
   pending_peer --> pending_admin: coworker accepts
   pending_peer --> declined: coworker can't
   pending_peer --> cancelled: requester cancels
-  pending_admin --> approved: Owner/Admin approves (sees overlap and time-off warnings)
-  pending_admin --> rejected: Owner/Admin declines (with an optional note)
+  pending_admin --> approved: Owner approves (sees overlap and time-off warnings)
+  pending_admin --> rejected: Owner declines (with an optional note)
   approved --> [*]: schedule updated + notification to everyone involved + history log
   rejected --> [*]
 ```
@@ -875,7 +875,7 @@ stateDiagram-v2
 | See the full published schedule | ✅ | ✅ | ✅ | ✅ (their location) | — |
 | Create and edit draft schedules | ✅ | ✅ | ✅ | — | — |
 | **Publish the schedule** | ✅ | ✅ | ❌ (builds drafts) | — | — |
-| **Approve shift changes** | ✅ | ✅ | ❌ (only "recommend", planned) | — | — |
+| **Approve shift changes and open-shift pickups** | ✅ | ❌ | ❌ | — | — |
 | **Approve time off** | ✅ | ✅ | ❌ | — | — |
 | Approve clock-ins outside the geofence | ✅ | ✅ | ❌ | — | — |
 | Edit time cards | ✅ | ✅ | ✅ (marked as edited) | — | — |
@@ -886,7 +886,7 @@ stateDiagram-v2
 | Announcements (planned) | ✅ | ✅ | ✅ | — | — |
 | Manager log / incidents (planned) | ✅ | ✅ | ✅ | bouncer: can only create incidents | — |
 | See the audit log | ✅ | ✅ | — | — | — |
-| Make other owners or admins | ✅ | admins only | — | — | — |
+| Make, edit or deactivate admins and owners; set their pay | ✅ | — | — | — | — |
 
 **Positions** (what job you do), separate from access:
 
@@ -917,7 +917,7 @@ stateDiagram-v2
 - [x] Sign-in (email + password), first-time owner setup
 - [x] Locations → **4 sections**, positions (GM, AM, Bartender, Barback, Cocktails, Bouncer), team, wages
 - [x] Weekly schedule: add/edit shifts, copy week, open shifts, shifts past midnight, publish
-- [x] Employee app: my schedule, open shifts, **request time off**, **cover/swap/drop/pickup → owner/admin approval**
+- [x] Employee app: my schedule, open shifts, **request time off**, **cover/swap/drop/pickup → owner approval**
 - [x] **GPS clock-in** (inside, uncertain or outside + review), breaks, automatic clock-out for forgotten punches
 - [x] Hours: review, edits with audit, approval of flagged entries, **CSV export**
 - [x] In-app notifications + optional Telegram; "Add to Home Screen" guide for iPhone
@@ -964,7 +964,7 @@ stateDiagram-v2
 1. **Which country or state is the bar in?** It decides overtime, breaks, tips, alcohol and security certifications, and privacy.
 2. **"4 sections":** are they **4 areas inside one bar** (e.g. bar, patio, VIP, door) or **4 branches/offices** with different addresses? (Both work today.)
 3. **"Give it to anyboard":** do you mean **anyone can use it easily**? Or that **other businesses** should use it too (multi-company)?
-4. **Approvals:** should **only the owner/admin** approve shift changes, or can the GM approve if the owner doesn't answer within X hours? (Today: owner/admin only, for both shift changes and time off.)
+4. **Approvals:** should **only the owner/admin** approve shift changes, or can the GM approve if the owner doesn't answer within X hours? (Decided Nov 18, 2026: only the owner approves shift changes and open-shift pickups; time off is still approved by the owner or an admin.)
 5. **Where will the Pi live?** At the bar or at your home? Is there stable internet and Ethernet?
 6. **How many employees and locations** are there today?
 7. **Tips:** are they shared? How (by hours, points, %)? Who gets a tip-out (barback, bouncer)?

@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react'
 import QRCode from 'qrcode'
-import { pb, api, errMsg, inviteUrl, ACCESS_LABEL, type Access, type PayRate, type User } from '../lib/pb'
+import { pb, api, errMsg, inviteUrl, canManage, isOwner, ACCESS_LABEL, type Access, type PayRate, type User } from '../lib/pb'
 import { useData } from '../store'
 import { Avatar, Banner, Button, Dot, Group, HeaderButton, InputRow, Page, Pill, Row, Segmented, SelectRow, Sheet, Spinner, SwitchRow, toast, type Tone } from '../ui'
 import { Icon } from '../icons'
 
-const ACCESS_HELP: Record<Access, string> = {
-  owner: 'Can do everything, including making admins.',
-  admin: 'Approves shift changes, time off and hours. Publishes schedules. Manages the team and locations.',
-  manager: 'Builds draft schedules and fixes hours at their locations. Cannot approve shift changes.',
+export const ACCESS_HELP: Record<Access, string> = {
+  owner: 'Does everything. The only one who approves shift changes and open-shift pickups, and who manages admins.',
+  admin: "Publishes schedules, approves time off and hours, sees pay and Insights, manages managers and employees. Doesn't approve shift changes.",
+  manager: "Builds draft schedules and fixes hours at their locations. Doesn't publish or approve anything.",
   employee: 'Clocks in and out, sees the schedule, asks for shift changes and time off.',
 }
 const ACCESS_TONE: Record<Access, Tone> = { owner: 'purple', admin: 'blue', manager: 'teal', employee: 'gray' }
@@ -85,7 +85,7 @@ export default function Team() {
       {edit && (
         <PersonSheet
           user={edit === 'new' ? null : edit}
-          canOwner={me.access === 'owner'}
+          canOwner={isOwner(me)}
           onClose={() => setEdit(null)}
           onInvite={(u) => {
             setEdit(null)
@@ -143,14 +143,17 @@ function PersonSheet({
       .catch(() => {})
   }, [user])
 
-  const lockedOwner = user?.access === 'owner' && !canOwner
   const isSelf = user?.id === me.id
+  // Owner > Admin > Manager > Employee. Admins can't edit admins or the owner,
+  // and only the owner changes someone's own access, positions or pay.
+  const locked = !!user && !isSelf && !canManage(me, user)
+  const selfOnly = isSelf && !canOwner
 
   const save = async () => {
     if (!f.name.trim()) return toast('Add their name.', 'error')
     if (!f.phone.trim() && !f.email.trim()) return toast('Add a phone number or an email so they can sign in.', 'error')
     if (multi && !allLocations && f.locations.length === 0) return toast('Pick at least one location where they work.', 'error')
-    if (isSelf && (!f.active || f.access !== user?.access) && !confirm("You're changing your own access. Are you sure?")) return
+    if (isSelf && canOwner && (!f.active || f.access !== user?.access) && !confirm("You're changing your own access. Are you sure?")) return
     setBusy(true)
     try {
       const body: Record<string, unknown> = {
@@ -163,6 +166,11 @@ function PersonSheet({
         active: f.active,
       }
       let saved: User
+      if (user && selfOnly) {
+        await pb.collection('users').update<User>(user.id, { name: body.name, email: body.email, phone: body.phone })
+        toast('Saved')
+        return onSaved()
+      }
       if (user) saved = await pb.collection('users').update<User>(user.id, body)
       else {
         const pw = randomPassword()
@@ -184,42 +192,68 @@ function PersonSheet({
 
   const toggle = (k: 'positions' | 'locations', id: string) =>
     setF((x) => ({ ...x, [k]: x[k].includes(id) ? x[k].filter((p) => p !== id) : [...x[k], id] }))
-  const levels = (['employee', 'manager', 'admin', 'owner'] as Access[]).filter((a) => a !== 'owner' || canOwner)
+  const levels = (['employee', 'manager', 'admin', 'owner'] as Access[]).filter((a) => canOwner || a === 'employee' || a === 'manager')
 
   return (
-    <Sheet title={user ? user.name || 'Edit Person' : 'Add Person'} onClose={onClose} onDone={save} doneLabel={user ? 'Save' : 'Add'} doneDisabled={lockedOwner} busy={busy}>
-      {lockedOwner && <p className="px-4 text-[15px] text-ios-orange">Only the owner can edit the owner.</p>}
+    <Sheet title={user ? user.name || 'Edit Person' : 'Add Person'} onClose={onClose} onDone={save} doneLabel={user ? 'Save' : 'Add'} doneDisabled={locked} busy={busy}>
+      {locked && (
+        <Banner tone="orange" icon="info">
+          Only the owner can edit {user?.access === 'owner' ? 'the owner' : 'admins'}.
+        </Banner>
+      )}
+      {selfOnly && (
+        <Banner tone="blue" icon="info">
+          You can change your name, phone and email. The owner changes your access level, positions and pay.
+        </Banner>
+      )}
       <Group footer={user ? undefined : "No password needed. After you add them, you'll get a link to send them so they can join."}>
         <InputRow label="Name" placeholder="Full name" autoFocus={!user} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
         <InputRow label="Phone" type="tel" placeholder="Mobile number" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} />
         <InputRow label="Email" type="email" autoCapitalize="none" placeholder="Optional" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
       </Group>
-      <Group header="Positions" footer="What they can work.">
-        {positions
-          .filter((p) => p.active || f.positions.includes(p.id))
-          .map((p) => (
-            <Row key={p.id} leading={<Dot color={p.color} size={12} />} title={p.name} check={f.positions.includes(p.id)} onClick={() => toggle('positions', p.id)} />
-          ))}
-      </Group>
-      {multi && !allLocations && (
-        <Group header="Works At" footer="They only see schedules and clock in at these locations.">
-          {locations.map((l) => (
-            <Row key={l.id} icon="pin" iconBg="#ff3b30" title={l.name} check={f.locations.includes(l.id)} onClick={() => toggle('locations', l.id)} />
-          ))}
+      {locked || selfOnly ? (
+        <Group header="Permissions" footer={ACCESS_HELP[f.access]}>
+          <Row title="Access Level" value={ACCESS_LABEL[f.access]} />
+          <Row
+            title="Positions"
+            value={
+              positions
+                .filter((p) => f.positions.includes(p.id))
+                .map((p) => p.name)
+                .join(', ') || 'None'
+            }
+          />
         </Group>
+      ) : (
+        <>
+        <Group header="Positions" footer="What they can work.">
+          {positions
+            .filter((p) => p.active || f.positions.includes(p.id))
+            .map((p) => (
+              <Row key={p.id} leading={<Dot color={p.color} size={12} />} title={p.name} check={f.positions.includes(p.id)} onClick={() => toggle('positions', p.id)} />
+            ))}
+        </Group>
+        {multi && !allLocations && (
+          <Group header="Works At" footer="They only see schedules and clock in at these locations.">
+            {locations.map((l) => (
+              <Row key={l.id} icon="pin" iconBg="#ff3b30" title={l.name} check={f.locations.includes(l.id)} onClick={() => toggle('locations', l.id)} />
+            ))}
+          </Group>
+        )}
+        <Group header="Permissions" footer={ACCESS_HELP[f.access] + (multi && allLocations ? ' Works at all locations.' : '')}>
+          <SelectRow label="Access Level" value={f.access} onChange={(v) => setF({ ...f, access: v as Access })} options={levels.map((a) => ({ value: a, label: ACCESS_LABEL[a] }))} />
+        </Group>
+        <Group header="Pay" footer="Optional. Only the owner and admins can see this.">
+          <InputRow label="Hourly Rate" type="number" inputMode="decimal" min={0} step="0.01" placeholder="$0.00" value={f.hourly} onChange={(e) => setF({ ...f, hourly: e.target.value })} />
+        </Group>
+        </>
       )}
-      <Group header="Permissions" footer={ACCESS_HELP[f.access] + (multi && allLocations ? ' Works at all locations.' : '')}>
-        <SelectRow label="Access Level" value={f.access} onChange={(v) => setF({ ...f, access: v as Access })} options={levels.map((a) => ({ value: a, label: ACCESS_LABEL[a] }))} />
-      </Group>
-      <Group header="Pay" footer="Optional. Only the owner and admins can see this.">
-        <InputRow label="Hourly Rate" type="number" inputMode="decimal" min={0} step="0.01" placeholder="$0.00" value={f.hourly} onChange={(e) => setF({ ...f, hourly: e.target.value })} />
-      </Group>
-      {user && user.active && !lockedOwner && (
+      {user && user.active && !locked && !isSelf && (
         <Group footer={user.joined_at ? 'Use this if they forgot their password. The link lets them choose a new one.' : "They haven't joined yet. Send them their link."}>
           <Row icon="send" iconBg="#007aff" title={user.joined_at ? 'Send New Sign-In Link' : 'Send Invite Link'} tone="link" onClick={() => onInvite(user)} />
         </Group>
       )}
-      {user && !isSelf && (
+      {user && !isSelf && !locked && (
         <Group footer="Deactivated people can't sign in. Their history stays.">
           <SwitchRow label="Active" checked={f.active} onChange={(v) => setF({ ...f, active: v })} />
         </Group>
@@ -315,5 +349,68 @@ function InviteSheet({ user, onClose }: { user: User; onClose: () => void }) {
         {user.phone ? `They'll sign in with ${user.phone}${user.email ? ` or ${user.email}` : ''}.` : `They'll sign in with ${user.email}.`}
       </p>
     </Sheet>
+  )
+}
+
+// ---------- who can do what (Settings → Access Levels) ----------
+const EVERYONE: Access[] = ['owner', 'admin', 'manager', 'employee']
+const CAN: { t: string; who: Access[]; note?: string }[] = [
+  { t: 'Approve shift swaps, covers and drops', who: ['owner'] },
+  { t: 'Approve open-shift pickups', who: ['owner'] },
+  { t: 'Make, edit or deactivate admins', who: ['owner'] },
+  { t: 'Set pay for admins', who: ['owner'] },
+  { t: 'Publish schedules and change published shifts', who: ['owner', 'admin'] },
+  { t: 'Approve time off', who: ['owner', 'admin'] },
+  { t: 'Approve clock-ins and hours', who: ['owner', 'admin'] },
+  { t: 'See pay, labor cost and Insights', who: ['owner', 'admin'] },
+  { t: 'Add and edit managers and employees', who: ['owner', 'admin'] },
+  { t: 'Locations, positions and settings', who: ['owner', 'admin'] },
+  { t: 'Build draft schedules', who: ['owner', 'admin', 'manager'], note: 'Managers: at their locations' },
+  { t: 'Fix hours', who: ['owner', 'admin', 'manager'], note: 'Managers: at their locations' },
+  { t: 'See the team schedule', who: EVERYONE, note: 'At the locations where they work' },
+  { t: 'Clock in, ask for shift changes and time off', who: EVERYONE },
+]
+function whoText(who: Access[]) {
+  if (who.length === 4) return 'Everyone'
+  if (who.length === 1) return 'Owner only'
+  if (who.length === 2) return 'Owner and admins'
+  return 'Owner, admins and managers'
+}
+
+export function AccessLevelsPage() {
+  const { users } = useData()
+  const count = (a: Access) => users.filter((u) => u.active && u.access === a).length
+  return (
+    <Page title="Access Levels" back={{ label: 'Settings', href: '#/settings' }}>
+      <Group header="From most to least" footer="Change someone's level in Team. Admins can only give the Manager or Employee level.">
+        {EVERYONE.map((a) => (
+          <Row key={a}>
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center justify-between gap-2">
+                <Pill tone={ACCESS_TONE[a]}>{ACCESS_LABEL[a]}</Pill>
+                <span className="text-[15px] text-ios-label2">
+                  {count(a)} {count(a) === 1 ? 'person' : 'people'}
+                </span>
+              </span>
+              <span className="mt-1.5 block text-[15px] leading-snug text-ios-label2">{ACCESS_HELP[a]}</span>
+            </span>
+          </Row>
+        ))}
+      </Group>
+      <Group header="Who Can Do What">
+        {CAN.map((c) => (
+          <Row
+            key={c.t}
+            title={c.t}
+            subtitle={
+              <>
+                <span className={c.who.length === 1 ? 'font-semibold text-ios-purple' : ''}>{whoText(c.who)}</span>
+                {c.note ? ` · ${c.note}` : ''}
+              </>
+            }
+          />
+        ))}
+      </Group>
+    </Page>
   )
 }

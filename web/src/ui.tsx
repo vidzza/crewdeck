@@ -9,14 +9,18 @@ export function Page({
   eyebrow,
   back,
   actions,
+  wide,
   children,
 }: {
   title: string
   eyebrow?: string
   back?: { label: string; href?: string }
   actions?: ReactNode
+  /** Use the full width on big screens (iPad, computer) — e.g. the schedule grid. */
+  wide?: boolean
   children: ReactNode
 }) {
+  const maxW = wide ? 'max-w-6xl' : 'max-w-2xl'
   return (
     <div className="pb-32">
       {back ? (
@@ -24,7 +28,7 @@ export function Page({
           className="sticky top-0 z-30 border-b border-ios-sep bg-ios-gray6/85 backdrop-blur-xl"
           style={{ paddingTop: 'env(safe-area-inset-top)' }}
         >
-          <div className="relative mx-auto flex h-11 max-w-2xl items-center justify-between px-2">
+          <div className={`relative mx-auto flex h-11 ${maxW} items-center justify-between px-2`}>
             <a
               href={back.href || '#'}
               onClick={(e) => {
@@ -43,13 +47,13 @@ export function Page({
           </div>
         </header>
       ) : (
-        <header className="mx-auto max-w-2xl px-4" style={{ paddingTop: 'calc(env(safe-area-inset-top) + 6px)' }}>
+        <header className={`mx-auto ${maxW} px-4`} style={{ paddingTop: 'calc(env(safe-area-inset-top) + 6px)' }}>
           <div className="flex h-11 items-center justify-end gap-1">{actions}</div>
           {eyebrow && <div className="text-[13px] font-semibold uppercase tracking-wide text-ios-label2">{eyebrow}</div>}
           <h1 className="text-[34px] font-bold leading-[41px] tracking-tight">{title}</h1>
         </header>
       )}
-      <main className="mx-auto max-w-2xl space-y-7 px-4 pt-4">{children}</main>
+      <main className={`mx-auto ${maxW} space-y-7 px-4 pt-4`}>{children}</main>
     </div>
   )
 }
@@ -430,6 +434,7 @@ export function Sheet({
   doneLabel = 'Done',
   doneDisabled,
   busy,
+  viewOnly,
   children,
 }: {
   title: string
@@ -438,6 +443,8 @@ export function Sheet({
   doneLabel?: string
   doneDisabled?: boolean
   busy?: boolean
+  /** Nothing to save: just a Done button (no Cancel). */
+  viewOnly?: boolean
   children: ReactNode
 }) {
   useEffect(() => {
@@ -464,9 +471,13 @@ export function Sheet({
           <span className="h-[5px] w-9 rounded-full bg-ios-gray3" />
         </div>
         <div className="grid grid-cols-[1fr_auto_1fr] items-center px-4 pb-2 pt-2.5">
-          <button type="button" onClick={onClose} className="justify-self-start text-[17px] text-ios-blue active:opacity-40">
-            Cancel
-          </button>
+          {viewOnly ? (
+            <span />
+          ) : (
+            <button type="button" onClick={onClose} className="justify-self-start text-[17px] text-ios-blue active:opacity-40">
+              Cancel
+            </button>
+          )}
           <h2 className="truncate px-2 text-[17px] font-semibold">{title}</h2>
           <div className="justify-self-end">
             {onDone &&
