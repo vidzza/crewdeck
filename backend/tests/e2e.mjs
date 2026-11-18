@@ -678,5 +678,12 @@ console.log('\n# Password guessing is slowed down (per visitor, behind Cloudflar
   ok(!!(await login('owner@test.com', 'password123'))?.token, 'requests from the Pi itself are never slowed down')
 }
 
+console.log('\n# Server settings')
+if (su?.token) {
+  const st = (await req('GET', '/api/settings', null, su.token)).data
+  ok(st?.backups?.cron === '0 11 * * *' && st.backups.cronMaxKeep === 14, 'daily backups are on, kept for 14 days', st?.backups)
+  ok(st?.rateLimits?.enabled === true && st.trustedProxy?.headers?.includes('CF-Connecting-IP'), 'rate limits use the visitor IP from Cloudflare', st?.trustedProxy)
+} else console.log('  (no superuser: skipped)')
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

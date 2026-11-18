@@ -73,7 +73,9 @@ Each employee opens the link, signs in, taps **Allow** for location, and adds it
 
 ## Backups
 
-- A daily copy of Crewdeck's database goes to `/opt/crewdeck/backups` (kept 14 days; needs `sqlite3` on the Pi).
+- Every day at 4 AM (Denver time) Crewdeck backs itself up to `/opt/crewdeck/pb_data/backups` and keeps the last 14 (PocketBase's own backups; nothing to install). Download or restore them from the dashboard: **Settings → Backups**.
+- If `sqlite3` is installed on the Pi, the installer also adds a daily copy of the database to `/opt/crewdeck/backups`.
+- Every update also keeps the previous version and data in `/opt/crewdeck/rollback` until the next update.
 - For off-Pi backups, open the PocketBase dashboard (`https://scheduler.hackxolotl.com/_/`) → **Settings → Backups** and add a Cloudflare R2 bucket. Protect `/_/` with Cloudflare Access first.
 - Create the dashboard superuser on the Pi:
 
